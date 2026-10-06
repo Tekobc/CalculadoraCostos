@@ -1,0 +1,31 @@
+:root {
+  --color-canvas: #F3F8F6;
+  --color-ink: #16302B;
+  --color-primary: #0F7B6C;
+  --color-primary-hover: #0c6256;
+  --color-accent: #FFB400;
+  --color-support: #FF7A90;
+  --color-danger: #D6455D;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-body, system-ui, sans-serif);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading, system-ui, sans-serif);
+    color: var(--color-ink);
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
