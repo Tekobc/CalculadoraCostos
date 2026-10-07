@@ -22,30 +22,85 @@ graph TD
     subgraph Domain [Motor Determinístico (src/domain)]
         SCH_P["profile.schema.ts"]
         SCH_C["costs.schema.ts"]
+        SCH_PRD["product.schema.ts"]
         CALC_E["energy.ts"]
         CALC_S["supplies.ts"]
         CALC_P["pricing.ts"]
         CALC_U["unit-cost.ts"]
-        TESTS["__tests__ (14 tests pasando)"]
+        CALC_INF["inflation.ts (Alertas y Simulación)"]
+        TESTS["__tests__ (Cálculos puramente matemáticos)"]
     end
 
-    subgraph UI_Tokens [Tokens & Estilos]
+    subgraph LLM_Layer [Capa de Asistencia LLM (src/lib/llm)]
+        LLM_SCH["schemas.ts (Zod)"]
+        LLM_PRM["prompts.ts (System Prompt & Extraction)"]
+        LLM_FLB["fallback.ts (Heurística determinística)"]
+        LLM_CLI["client.ts (Gemini Free / Groq Free / Claude)"]
+        API_ONB["/api/onboarding/extract (Route Handler)"]
+        LLM_TST["__tests__/llm-extraction.test.ts"]
+    end
+
+    subgraph UI_Tokens [Tokens & Primitivos UI]
         CSS_TOK["src/styles/tokens.css"]
         TW_CFG["tailwind.config.js"]
+        UI_BTN["button.tsx"]
+        UI_CRD["card.tsx"]
+        UI_INP["input.tsx"]
+        UI_LBL["label.tsx"]
+        UI_BDG["badge.tsx"]
+    end
+
+    subgraph Features [Componentes de Aplicación]
+        PAGE["src/app/page.tsx"]
+        ONB["onboarding-interactive.tsx"]
+        QUC["quick-unit-cost.tsx"]
+        SIM["pricing-simulator.tsx"]
+        PRD_CAT["product-catalog-manager.tsx"]
+        INF_SIM["cost-variation-simulator.tsx"]
+        INF_BDG["inflation-alert-badge.tsx"]
     end
 
     Skills --> CTX
     CTX --> SCH_P
     CTX --> SCH_C
+    CTX --> SCH_PRD
     SCH_C --> CALC_U
     CALC_E --> CALC_U
     CALC_S --> CALC_U
+    CALC_S --> CALC_INF
     CALC_E --> TESTS
     CALC_S --> TESTS
     CALC_P --> TESTS
     CALC_U --> TESTS
+    CALC_INF --> TESTS
     DT --> CSS_TOK
     CSS_TOK --> TW_CFG
+    TW_CFG --> UI_BTN
+    TW_CFG --> UI_CRD
+    TW_CFG --> UI_INP
+    TW_CFG --> UI_BDG
+    UI_CRD --> QUC
+    UI_CRD --> SIM
+    UI_CRD --> ONB
+    UI_CRD --> PRD_CAT
+    UI_CRD --> INF_SIM
+    CALC_P --> SIM
+    CALC_S --> QUC
+    CALC_INF --> INF_BDG
+    INF_BDG --> PRD_CAT
+    CALC_INF --> INF_SIM
+    SCH_P --> ONB
+    LLM_SCH --> API_ONB
+    LLM_PRM --> LLM_CLI
+    LLM_FLB --> LLM_CLI
+    LLM_CLI --> API_ONB
+    LLM_FLB --> LLM_TST
+    API_ONB --> ONB
+    QUC --> PAGE
+    SIM --> PAGE
+    ONB --> PAGE
+    PRD_CAT --> PAGE
+    INF_SIM --> PAGE
 ```
 
 ---
@@ -79,4 +134,42 @@ graph TD
   - Los tokens CSS centralizados conectan la paleta identitaria (`#F3F8F6`, `#16302B`, `#0F7B6C`, etc.) con Tailwind.
 - **Estado de validación**:
   - `vitest`: 14 tests unitarios aprobados (100% de los casos límite de cálculos).
-  - `typecheck`: 0 errores de TypeScript en modo estricto.
+
+### [Feature 2] Interfaz Interactiva de Onboarding, Calculadora de Lotes y Simulador de Precios
+- **Fecha**: 2026-10-07
+- **Archivos creados/modificados**:
+  - `src/components/ui/badge.tsx` (etiquetas visuales con variantes de tokens: `accent`, `support`, `danger`)
+  - `src/components/calculator/pricing-simulator.tsx` (simulador reactivo Margen vs Markup y punto de equilibrio)
+  - `src/components/calculator/quick-unit-cost.tsx` (cálculo de tanda/receta, insumos con mermas y mano de obra)
+  - `src/components/onboarding/onboarding-interactive.tsx` (flujo híbrido en 3 pasos con stickers y activación selectiva de módulos)
+  - `src/app/page.tsx` (dashboard principal accesible con navegación por solapas)
+- **Conexiones**:
+  - `pricing-simulator.tsx` consume las funciones puras de `pricing.ts` mostrando en tiempo real precios comparados y unidades de equilibrio.
+  - `quick-unit-cost.tsx` consume `supplies.ts` para aplicar factores de conversión y mermas a insumos con formato `es-AR`.
+  - `onboarding-interactive.tsx` tipa y valida el modelo de negocio contra `BusinessProfileSchema`.
+
+### [Feature 3] Fase 2 — Inteligencia, Modelos Gratuitos y Onboarding Híbrido Asistido por LLM
+- **Fecha**: 2026-10-07
+- **Archivos creados/modificados**:
+  - `src/lib/llm/schemas.ts` (esquema Zod estricto para estructurar y validar sugerencias de perfil, equipos, insumos y preguntas dinámicas)
+  - `src/lib/llm/prompts.ts` (system prompt versionado y constructor de prompt con contexto argentino y restricción de nunca calcular precios)
+  - `src/lib/llm/fallback.ts` (motor heurístico de degradación elegante cuando no hay conexión o API key configurada)
+  - `src/lib/llm/client.ts` (soporte multimodelo: Google Gemini Flash gratuito, Groq Llama 3 gratuito, Claude de Anthropic y fallback heurístico)
+  - `src/app/api/onboarding/extract/route.ts` (route handler de Next.js que expone el endpoint seguro `/api/onboarding/extract`)
+  - `src/components/onboarding/onboarding-interactive.tsx` (integración completa del llamado al asistente, presentación de resumen, stickers `estimado` y preguntas de seguimiento dinámicas)
+  - `src/lib/llm/__tests__/llm-extraction.test.ts` (tests unitarios para el fallback y validación del esquema Zod)
+  - `.env.example` (documentación de claves gratuitas)
+
+### [Feature 4] Fase 3 — Gestión de Productos, Control de Inflación y Variación de Costos
+- **Fecha**: 2026-10-07
+- **Archivos creados/modificados**:
+  - `src/domain/calculator/inflation.ts` (motor determinístico para cálculo de días desde la última actualización, umbrales de alerta y simulación de variaciones)
+  - `src/domain/calculator/__tests__/inflation.test.ts` (cobertura completa de casos de inflación y simulación de aumento de insumos y tarifas)
+  - `src/components/calculator/inflation-alert-badge.tsx` (etiqueta visual accesible con estados `ok`, `warning` (>30 días) y `critical` (>45 días o sin fecha))
+  - `src/components/calculator/product-catalog-manager.tsx` (administrador de recetas/productos con edición rápida de precios de insumos en pesos)
+  - `src/components/calculator/cost-variation-simulator.tsx` (simulador en tiempo real de subas inflacionarias en insumos y tarifas energéticas)
+  - `src/app/page.tsx` (integración en el menú principal con alerta global de insumos por revisar)
+- **Conexiones**:
+  - Responde al contexto inflacionario de Argentina (Sección 7 de `context.md`): advierte precios desactualizados para evitar vender a pérdida.
+  - `inflation.ts` opera con `Decimal.js` garantizando exactitud matemática reproducible.
+  - La UI permite ajustar los insumos y recalcular de inmediato el precio sugerido para preservar el margen neto del emprendedor.

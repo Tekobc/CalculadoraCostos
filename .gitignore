@@ -34,3 +34,4 @@ Thumbs.db
 # Graphify / Scratch / Temp
 graphify-out/
 scratch/
+*.tsbuildinfo
