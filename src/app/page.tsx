@@ -6,6 +6,7 @@ import { QuickUnitCostCalculator } from '@/components/calculator/quick-unit-cost
 import { PricingSimulator } from '@/components/calculator/pricing-simulator';
 import { ProductCatalogManager } from '@/components/calculator/product-catalog-manager';
 import { CostVariationSimulator } from '@/components/calculator/cost-variation-simulator';
+import { AuthModal } from '@/components/auth/auth-modal';
 import { Badge } from '@/components/ui/badge';
 import { BusinessProfile } from '@/domain/schemas/profile.schema';
 import { Product } from '@/domain/schemas/product.schema';
@@ -113,9 +114,10 @@ const INITIAL_PRODUCTS: Product[] = [
 ];
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<'products' | 'simulator' | 'calculator' | 'pricing' | 'onboarding'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'simulator' | 'calculator' | 'pricing' | 'onboarding' | 'auth'>('products');
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const handleProfileCreated = (newProfile: BusinessProfile) => {
     setProfile(newProfile);
@@ -229,6 +231,17 @@ export default function HomePage() {
         >
           ✨ Configuración y Onboarding
         </button>
+
+        <button
+          onClick={() => setActiveTab('auth')}
+          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+            activeTab === 'auth'
+              ? 'bg-primary text-white shadow-sm'
+              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
+          }`}
+        >
+          ☁️ {userEmail ? 'Mi Cuenta Nube' : 'Guardar en la Nube'}
+        </button>
       </nav>
 
       {/* Contenido dinámico */}
@@ -263,6 +276,17 @@ export default function HomePage() {
         {activeTab === 'onboarding' && (
           <div className="space-y-6">
             <OnboardingInteractive onProfileCreated={handleProfileCreated} />
+          </div>
+        )}
+
+        {activeTab === 'auth' && (
+          <div className="space-y-6 py-4">
+            <AuthModal
+              currentUserEmail={userEmail}
+              onAuthSuccess={() => {
+                setActiveTab('products');
+              }}
+            />
           </div>
         )}
       </section>

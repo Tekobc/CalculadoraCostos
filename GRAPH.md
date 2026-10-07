@@ -40,6 +40,15 @@ graph TD
         LLM_TST["__tests__/llm-extraction.test.ts"]
     end
 
+    subgraph Supabase_Auth [Persistencia y Multi-tenant (src/lib/supabase)]
+        SUPA_SQL["schema.sql (PostgreSQL + RLS)"]
+        SUPA_CLI["client.ts (Browser SSR)"]
+        SUPA_SRV["server.ts (Server Client con Cookies)"]
+        AUTH_ACT["auth-actions.ts (Login / Register / Logout)"]
+        DB_ACT["db-actions.ts (CRUD seguro RLS)"]
+        AUTH_UI["auth-modal.tsx (Formulario UI)"]
+    end
+
     subgraph UI_Tokens [Tokens & Primitivos UI]
         CSS_TOK["src/styles/tokens.css"]
         TW_CFG["tailwind.config.js"]
@@ -84,6 +93,7 @@ graph TD
     UI_CRD --> ONB
     UI_CRD --> PRD_CAT
     UI_CRD --> INF_SIM
+    UI_CRD --> AUTH_UI
     CALC_P --> SIM
     CALC_S --> QUC
     CALC_INF --> INF_BDG
@@ -96,6 +106,10 @@ graph TD
     LLM_CLI --> API_ONB
     LLM_FLB --> LLM_TST
     API_ONB --> ONB
+    SUPA_SRV --> AUTH_ACT
+    SUPA_SRV --> DB_ACT
+    AUTH_ACT --> AUTH_UI
+    AUTH_UI --> PAGE
     QUC --> PAGE
     SIM --> PAGE
     ONB --> PAGE
@@ -169,7 +183,18 @@ graph TD
   - `src/components/calculator/product-catalog-manager.tsx` (administrador de recetas/productos con edición rápida de precios de insumos en pesos)
   - `src/components/calculator/cost-variation-simulator.tsx` (simulador en tiempo real de subas inflacionarias en insumos y tarifas energéticas)
   - `src/app/page.tsx` (integración en el menú principal con alerta global de insumos por revisar)
+
+### [Feature 5] Fase 4 — Multi-tenant, Persistencia en PostgreSQL y Autenticación con Supabase
+- **Fecha**: 2026-10-07
+- **Archivos creados/modificados**:
+  - `src/lib/supabase/schema.sql` (esquema DDL completo con tablas `business_profiles`, `supplies`, `products` y políticas Row Level Security `auth.uid() = user_id`)
+  - `src/lib/supabase/client.ts` (cliente browser de `@supabase/ssr` para componentes interactivos)
+  - `src/lib/supabase/server.ts` (cliente servidor seguro de `@supabase/ssr` con cookies en Server Actions y Server Components)
+  - `src/lib/supabase/auth-actions.ts` (Server Actions para registro, login y logout)
+  - `src/lib/supabase/db-actions.ts` (Server Actions con validación Zod estricta para guardar y leer perfiles y productos con RLS)
+  - `src/components/auth/auth-modal.tsx` (formulario UI de autenticación y estado de sesión)
+  - `src/app/page.tsx` (nueva pestaña 'Guardar en la Nube' y sincronización de sesión)
+  - `.env.example` (instrucciones para `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY`)
 - **Conexiones**:
-  - Responde al contexto inflacionario de Argentina (Sección 7 de `context.md`): advierte precios desactualizados para evitar vender a pérdida.
-  - `inflation.ts` opera con `Decimal.js` garantizando exactitud matemática reproducible.
-  - La UI permite ajustar los insumos y recalcular de inmediato el precio sugerido para preservar el margen neto del emprendedor.
+  - Aislamiento multi-tenant no negociable (Sección 8 de `context.md`): ningún usuario puede leer ni modificar costos de otro emprendimiento.
+  - Toda mutación pasa primero por validación Zod (`safeParse`) antes de tocar la base de datos.
