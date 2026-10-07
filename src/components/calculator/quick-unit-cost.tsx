@@ -24,7 +24,11 @@ interface QuickSupply {
   status: 'confirmado' | 'estimado';
 }
 
-export function QuickUnitCostCalculator() {
+interface QuickUnitCostCalculatorProps {
+  onSaveAsProduct?: (newProduct: any) => void;
+}
+
+export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalculatorProps = {}) {
   const [unidadesLote, setUnidadesLote] = useState<string>('12');
   const [manoDeObraHoras, setManoDeObraHoras] = useState<string>('2');
   const [costoHoraMo, setCostoHoraMo] = useState<string>('3000');
@@ -276,13 +280,53 @@ export function QuickUnitCostCalculator() {
             </p>
           </div>
 
-          <div className="text-center sm:text-right bg-white px-5 py-3 rounded-xl border border-ink/10 shadow-sm">
+          <div className="text-center sm:text-right bg-white px-5 py-3 rounded-xl border border-ink/10 shadow-sm space-y-1">
             <span className="text-xs uppercase tracking-wider text-ink/60 font-semibold block">
               Costo unitario real
             </span>
-            <span className="text-2xl sm:text-3xl font-extrabold text-primary tabular-nums">
+            <span className="text-2xl sm:text-3xl font-extrabold text-primary tabular-nums block">
               {formatCurrencyARS(costoUnitario.toNumber())}
             </span>
+            {onSaveAsProduct && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const newProd = {
+                    id: Math.random().toString(36).substring(2, 9),
+                    nombre: 'Receta Calculada',
+                    tipo: 'producto',
+                    unidades_lote_base: unidades,
+                    insumos: supplies.map((s) => ({
+                      id: Math.random().toString(),
+                      nombre: s.nombre,
+                      cantidad_compra: parseFloat(s.cantidadCompra) || 1,
+                      unidad_compra: s.unidadCompra,
+                      precio_compra: parseFloat(s.precioCompra) || 0,
+                      cantidad_usada: parseFloat(s.cantidadUsada) || 0,
+                      unidad_uso: s.unidadUso,
+                      factor_conversion: parseFloat(s.factorConversion) || 1,
+                      merma_porcentaje: parseFloat(s.merma) || 0,
+                      fecha_actualizacion: new Date().toISOString(),
+                      status: s.status,
+                    })),
+                    packaging: [],
+                    consumo_energia: [],
+                    consumo_gas: [],
+                    tiempo_produccion_horas: horasMo,
+                    costo_hora_mano_obra: tarifaMo,
+                    estrategia_precio: 'margen',
+                    porcentaje_objetivo: 35,
+                    fecha_creacion: new Date().toISOString(),
+                    fecha_actualizacion: new Date().toISOString(),
+                  };
+                  onSaveAsProduct(newProd);
+                }}
+                className="mt-2 text-xs w-full"
+              >
+                💾 Guardar en Mis Productos
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>

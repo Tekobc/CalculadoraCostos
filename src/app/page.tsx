@@ -269,7 +269,12 @@ export default function HomePage() {
 
         {activeTab === 'calculator' && (
           <div className="space-y-6">
-            <QuickUnitCostCalculator />
+            <QuickUnitCostCalculator
+              onSaveAsProduct={(newProd) => {
+                setProducts([newProd, ...products]);
+                setActiveTab('products');
+              }}
+            />
           </div>
         )}
 

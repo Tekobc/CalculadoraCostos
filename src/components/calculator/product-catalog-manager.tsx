@@ -167,14 +167,40 @@ export function ProductCatalogManager({
           </CardHeader>
 
           <CardContent className="space-y-6">
-            {/* Tabla de insumos con control de inflación */}
-            <div className="space-y-3">
-              <h4 className="font-semibold text-ink text-sm sm:text-base flex items-center justify-between">
-                <span>Insumos y Fecha de Última Actualización</span>
-                <span className="text-xs font-normal text-ink/65">
-                  Control contextual anti-inflación (Argentina)
-                </span>
-              </h4>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-ink text-sm sm:text-base">Insumos y Fecha de Última Actualización</h4>
+                  <p className="text-xs font-normal text-ink/65">Control contextual anti-inflación (Argentina)</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const nuevoInsumo: SupplyItem = {
+                      id: Math.random().toString(),
+                      nombre: 'Nuevo Insumo',
+                      cantidad_compra: 1,
+                      unidad_compra: 'kg',
+                      precio_compra: 1000,
+                      cantidad_usada: 100,
+                      unidad_uso: 'gr',
+                      factor_conversion: 1000,
+                      merma_porcentaje: 0,
+                      fecha_actualizacion: new Date().toISOString(),
+                      status: 'confirmado',
+                    };
+                    const updatedProduct = {
+                      ...activeProduct,
+                      insumos: [...activeProduct.insumos, nuevoInsumo],
+                      fecha_actualizacion: new Date().toISOString(),
+                    };
+                    onProductsChange(products.map((p) => (p.id === activeProduct.id ? updatedProduct : p)));
+                  }}
+                  className="text-xs"
+                >
+                  + Agregar Insumo
+                </Button>
+              </div>
 
               <div className="space-y-2.5">
                 {activeProduct.insumos.map((item) => {
