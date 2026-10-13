@@ -6,6 +6,7 @@ import { QuickUnitCostCalculator } from '@/components/calculator/quick-unit-cost
 import { PricingSimulator } from '@/components/calculator/pricing-simulator';
 import { ProductCatalogManager } from '@/components/calculator/product-catalog-manager';
 import { CostVariationSimulator } from '@/components/calculator/cost-variation-simulator';
+import { OperationsManager } from '@/components/operations/operations-manager';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { Badge } from '@/components/ui/badge';
 import { BusinessProfile, BusinessProfileSchema, ModuleType } from '@/domain/schemas/profile.schema';
@@ -120,7 +121,7 @@ const INITIAL_PRODUCTS: Product[] = [
 ];
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<'products' | 'simulator' | 'calculator' | 'pricing' | 'onboarding' | 'auth'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'simulator' | 'calculator' | 'pricing' | 'inventory' | 'production' | 'orders' | 'onboarding' | 'auth'>('products');
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -376,6 +377,39 @@ export default function HomePage() {
         </button>}
 
         <button
+          onClick={() => setActiveTab('inventory')}
+          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+            activeTab === 'inventory'
+              ? 'bg-primary text-white shadow-sm'
+              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
+          } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
+        >
+          📦 Stock
+        </button>
+
+        <button
+          onClick={() => setActiveTab('production')}
+          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+            activeTab === 'production'
+              ? 'bg-primary text-white shadow-sm'
+              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
+          } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
+        >
+          🏭 Producción
+        </button>
+
+        <button
+          onClick={() => setActiveTab('orders')}
+          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
+            activeTab === 'orders'
+              ? 'bg-primary text-white shadow-sm'
+              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
+          } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
+        >
+          🧾 Pedidos
+        </button>
+
+        <button
           onClick={() => setActiveTab(userId ? 'onboarding' : 'auth')}
           className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
             activeTab === 'onboarding'
@@ -460,6 +494,15 @@ export default function HomePage() {
             />
           </div>
         )}
+
+        <div className={activeTab === 'inventory' || activeTab === 'production' || activeTab === 'orders' ? '' : 'hidden'}>
+          <OperationsManager
+            products={products}
+            userId={userId}
+            accountReady={!authLoading && !accountLoading}
+            view={activeTab === 'orders' || activeTab === 'production' ? activeTab : 'inventory'}
+          />
+        </div>
 
         {activeTab === 'onboarding' && (
           <div className="space-y-6">

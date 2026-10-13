@@ -3,6 +3,11 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { BusinessProfile, BusinessProfileSchema } from '@/domain/schemas/profile.schema';
 import { Product, ProductSchema } from '@/domain/schemas/product.schema';
+import {
+  EMPTY_OPERATIONS_WORKSPACE,
+  OperationsWorkspace,
+  OperationsWorkspaceSchema,
+} from '@/domain/schemas/operations.schema';
 import { revalidatePath } from 'next/cache';
 import { randomUUID } from 'crypto';
 
@@ -189,4 +194,63 @@ export async function getUserProducts(): Promise<{ products: Product[]; error?: 
     return { products: [], error: 'Hay productos guardados con datos inválidos.' };
   }
   return { products: products.map((product) => product.success ? product.data : null).filter((product): product is Product => product !== null) };
+}
+
+export async function getOperationsWorkspace(): Promise<{
+  workspace: OperationsWorkspace;
+  error?: string;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { workspace: EMPTY_OPERATIONS_WORKSPACE };
+
+  const { data, error } = await supabase
+    .from('operations_workspaces')
+    .select('inventario, operaciones')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error) return { workspace: EMPTY_OPERATIONS_WORKSPACE, error: describeDatabaseError(error) };
+  if (!data) return { workspace: EMPTY_OPERATIONS_WORKSPACE };
+
+  const validation = OperationsWorkspaceSchema.safeParse({
+    inventario: data.inventario,
+    operaciones: data.operaciones,
+  });
+  if (!validation.success) {
+    return { workspace: EMPTY_OPERATIONS_WORKSPACE, error: 'El stock o las operaciones guardadas tienen datos inválidos.' };
+  }
+
+  return { workspace: validation.data };
+}
+
+export async function saveOperationsWorkspace(workspace: OperationsWorkspace) {
+  const validation = OperationsWorkspaceSchema.safeParse(workspace);
+  if (!validation.success) {
+    return { error: 'El stock o las operaciones tienen datos inválidos.', details: validation.error.format() };
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: 'Debe iniciar sesión para guardar el stock y las operaciones' };
+
+  const { error } = await supabase
+    .from('operations_workspaces')
+    .upsert({
+      user_id: user.id,
+      inventario: validation.data.inventario,
+      operaciones: validation.data.operaciones,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+
+  if (error) return { error: describeDatabaseError(error) };
+
+  revalidatePath('/', 'layout');
+  return { success: true };
 }

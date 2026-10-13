@@ -187,4 +187,42 @@ grant select, insert, update, delete on public.business_profiles to authenticate
 grant select, insert, update, delete on public.supplies to authenticated;
 grant select, insert, update, delete on public.products to authenticated;
 
+-- 6. TABLA: OPERATIONS_WORKSPACES (Stock, producción y pedidos)
+create table if not exists public.operations_workspaces (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  inventario jsonb not null default '[]'::jsonb,
+  operaciones jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.operations_workspaces enable row level security;
+
+drop policy if exists "Users can read own operations workspace" on public.operations_workspaces;
+drop policy if exists "Users can insert own operations workspace" on public.operations_workspaces;
+drop policy if exists "Users can update own operations workspace" on public.operations_workspaces;
+drop policy if exists "Users can delete own operations workspace" on public.operations_workspaces;
+
+create policy "Users can read own operations workspace"
+  on public.operations_workspaces for select
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+create policy "Users can insert own operations workspace"
+  on public.operations_workspaces for insert
+  to authenticated
+  with check ((select auth.uid()) = user_id);
+
+create policy "Users can update own operations workspace"
+  on public.operations_workspaces for update
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+create policy "Users can delete own operations workspace"
+  on public.operations_workspaces for delete
+  to authenticated
+  using ((select auth.uid()) = user_id);
+
+grant select, insert, update, delete on public.operations_workspaces to authenticated;
+
 notify pgrst, 'reload schema';

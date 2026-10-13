@@ -102,6 +102,13 @@ Cada emprendimiento activa **solo los módulos que le aplican**. Esto resuelve, 
 | Packaging y logística | Productos | Envases, envío, delivery |
 | Servicios | Servicios | Costo por hora, traslados, materiales |
 
+### Stock, producción y pedidos
+- El stock es compartido entre recetas por nombre de insumo (sin distinguir mayúsculas) y unidad de compra. El nombre y la unidad cargados en stock deben coincidir con los de la receta.
+- La cantidad requerida se calcula según las unidades del lote base, el factor de conversión y la merma. El costo estimado usa el precio por unidad del stock; si el insumo todavía no está cargado, usa el precio de compra guardado en la receta.
+- La producción admite una vista diaria o semanal. Los pedidos se registran por separado y pueden incluir cliente y fecha de entrega.
+- Las operaciones planificadas reservan insumos y se comparan en conjunto con el stock disponible. Al marcarlas realizadas, descuentan las cantidades requeridas; la operación y el cambio de stock se guardan juntos.
+- En modo demostración, los datos quedan en el navegador. Para cuentas, ejecutar `src/lib/supabase/schema.sql` en Supabase para crear la tabla de operaciones protegida por RLS.
+
 ### Ejemplo de perfil (forma de referencia)
 
 ```json
@@ -266,6 +273,7 @@ El proyecto cuenta con skills configuradas en `.agents/skills/`:
 **Fase 3 — Gestión de Costos y Alertas Locales**
 - CRUD de insumos y productos con control de inflación (antigüedad de costos).
 - Simulador de variaciones de costos (tarifas, materias primas).
+- Stock compartido, planificación diaria/semanal de producción y pedidos con estimación de costos, ingresos y faltantes.
 
 **Fase 4 — Multi-tenant y Autenticación**
 - Integración de Supabase Auth y políticas RLS para aislamiento de datos.
