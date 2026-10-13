@@ -18,30 +18,55 @@ create table if not exists public.business_profiles (
   lugar_trabajo text not null check (lugar_trabajo in ('casa', 'local_propio', 'local_alquilado', 'taller_compartido')),
   modulos_activos text[] not null default array['insumos', 'mano_de_obra'],
   equipos jsonb not null default '[]'::jsonb,
+  descripcion_negocio text not null default '',
+  preguntas_seguimiento jsonb not null default '[]'::jsonb,
+  respuestas_seguimiento jsonb not null default '{}'::jsonb,
+  insumos_sugeridos jsonb not null default '[]'::jsonb,
+  resumen_analisis text,
+  fuente_analisis text not null default 'fallback_heuristico',
+  proveedor_analisis text not null default 'fallback',
   origen text not null default 'cuestionario_fijo',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+alter table public.business_profiles
+  add column if not exists descripcion_negocio text not null default '',
+  add column if not exists preguntas_seguimiento jsonb not null default '[]'::jsonb,
+  add column if not exists respuestas_seguimiento jsonb not null default '{}'::jsonb,
+  add column if not exists insumos_sugeridos jsonb not null default '[]'::jsonb,
+  add column if not exists resumen_analisis text,
+  add column if not exists fuente_analisis text not null default 'fallback_heuristico',
+  add column if not exists proveedor_analisis text not null default 'fallback';
+
 -- RLS: business_profiles
 alter table public.business_profiles enable row level security;
 
+drop policy if exists "Users can read own business profile" on public.business_profiles;
+drop policy if exists "Users can insert own business profile" on public.business_profiles;
+drop policy if exists "Users can update own business profile" on public.business_profiles;
+drop policy if exists "Users can delete own business profile" on public.business_profiles;
+
 create policy "Users can read own business profile"
   on public.business_profiles for select
-  using (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id);
 
 create policy "Users can insert own business profile"
   on public.business_profiles for insert
-  with check (auth.uid() = user_id);
+  to authenticated
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users can update own business profile"
   on public.business_profiles for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users can delete own business profile"
   on public.business_profiles for delete
-  using (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id);
 
 -- 3. TABLA: SUPPLIES (Catálogo global de insumos por usuario con control de inflación)
 create table if not exists public.supplies (
@@ -61,22 +86,31 @@ create table if not exists public.supplies (
 -- RLS: supplies
 alter table public.supplies enable row level security;
 
+drop policy if exists "Users can read own supplies" on public.supplies;
+drop policy if exists "Users can insert own supplies" on public.supplies;
+drop policy if exists "Users can update own supplies" on public.supplies;
+drop policy if exists "Users can delete own supplies" on public.supplies;
+
 create policy "Users can read own supplies"
   on public.supplies for select
-  using (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id);
 
 create policy "Users can insert own supplies"
   on public.supplies for insert
-  with check (auth.uid() = user_id);
+  to authenticated
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users can update own supplies"
   on public.supplies for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users can delete own supplies"
   on public.supplies for delete
-  using (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id);
 
 -- 4. TABLA: PRODUCTS (Ficha de producto y costos de lote)
 create table if not exists public.products (
@@ -97,6 +131,8 @@ create table if not exists public.products (
   -- Mano de obra
   tiempo_produccion_horas numeric not null default 0 check (tiempo_produccion_horas >= 0),
   costo_hora_mano_obra numeric not null default 0 check (costo_hora_mano_obra >= 0),
+  costos_fijos_unitarios numeric not null default 0 check (costos_fijos_unitarios >= 0),
+  impuestos_comisiones_porcentaje numeric not null default 0 check (impuestos_comisiones_porcentaje >= 0 and impuestos_comisiones_porcentaje < 100),
   
   -- Estrategia de pricing
   estrategia_precio text not null default 'margen' check (estrategia_precio in ('margen', 'markup')),
@@ -107,28 +143,48 @@ create table if not exists public.products (
   updated_at timestamptz not null default now()
 );
 
+alter table public.products
+  add column if not exists costos_fijos_unitarios numeric not null default 0 check (costos_fijos_unitarios >= 0),
+  add column if not exists impuestos_comisiones_porcentaje numeric not null default 0 check (impuestos_comisiones_porcentaje >= 0 and impuestos_comisiones_porcentaje < 100);
+
 -- RLS: products
 alter table public.products enable row level security;
 
+drop policy if exists "Users can read own products" on public.products;
+drop policy if exists "Users can insert own products" on public.products;
+drop policy if exists "Users can update own products" on public.products;
+drop policy if exists "Users can delete own products" on public.products;
+
 create policy "Users can read own products"
   on public.products for select
-  using (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id);
 
 create policy "Users can insert own products"
   on public.products for insert
-  with check (auth.uid() = user_id);
+  to authenticated
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users can update own products"
   on public.products for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users can delete own products"
   on public.products for delete
-  using (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id);
 
 -- 5. ÍNDICES DE PERFORMANCE MULTI-TENANT
 create index if not exists idx_business_profiles_user on public.business_profiles(user_id);
+create unique index if not exists idx_business_profiles_user_unique on public.business_profiles(user_id);
 create index if not exists idx_supplies_user on public.supplies(user_id);
 create index if not exists idx_supplies_actualizacion on public.supplies(user_id, fecha_actualizacion);
 create index if not exists idx_products_user on public.products(user_id);
+
+grant select, insert, update, delete on public.business_profiles to authenticated;
+grant select, insert, update, delete on public.supplies to authenticated;
+grant select, insert, update, delete on public.products to authenticated;
+
+notify pgrst, 'reload schema';

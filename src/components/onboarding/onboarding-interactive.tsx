@@ -1,16 +1,18 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { BusinessProfile, ModuleType, Equipment } from '@/domain/schemas/profile.schema';
-import { LLMProfileExtraction } from '@/lib/llm/schemas';
+import { LLMProfileExtraction, LLMProfileExtractionSchema } from '@/lib/llm/schemas';
+import { generateDeterministicProfile } from '@/lib/llm/fallback';
 
 interface OnboardingInteractiveProps {
-  onProfileCreated?: (profile: BusinessProfile) => void;
+  initialProfile?: BusinessProfile | null;
+  onProfileCreated?: (profile: BusinessProfile) => Promise<void>;
 }
 
 const MODULOS_DISPONIBLES: { id: ModuleType; label: string; desc: string }[] = [
@@ -24,36 +26,37 @@ const MODULOS_DISPONIBLES: { id: ModuleType; label: string; desc: string }[] = [
   { id: 'servicios', label: 'Servicios Profesionales', desc: 'Costo por hora, traslados y visitas técnicas' },
 ];
 
-export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiveProps) {
+export function OnboardingInteractive({ initialProfile, onProfileCreated }: OnboardingInteractiveProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [analysisWarning, setAnalysisWarning] = useState<string | null>(null);
 
   // Paso 1: Preguntas base
-  const [rubro, setRubro] = useState('Gastronomía y Pastelería');
-  const [tipo, setTipo] = useState<'producto' | 'servicio' | 'mixto'>('producto');
-  const [provincia, setProvincia] = useState('Buenos Aires');
-  const [lugarTrabajo, setLugarTrabajo] = useState<'casa' | 'local_propio' | 'local_alquilado' | 'taller_compartido'>('casa');
-  const [tieneEmpleados, setTieneEmpleados] = useState(false);
+  const [rubro, setRubro] = useState(initialProfile?.rubro ?? '');
+  const [tipo, setTipo] = useState<'producto' | 'servicio' | 'mixto'>(initialProfile?.tipo ?? 'producto');
+  const [provincia, setProvincia] = useState(initialProfile?.provincia ?? '');
+  const [lugarTrabajo, setLugarTrabajo] = useState<'casa' | 'local_propio' | 'local_alquilado' | 'taller_compartido'>(initialProfile?.lugar_trabajo ?? 'casa');
+  const [tieneEmpleados, setTieneEmpleados] = useState(initialProfile?.tiene_empleados ?? false);
 
   // Paso 2: Explicación libre y propuesta del LLM
-  const [descripcionLibre, setDescripcionLibre] = useState(
-    'Hago tortas artesanales y alfajores desde casa. Uso batidora eléctrica y horno a gas. Envaso en cajas con visor y hago envíos.'
-  );
+  const [descripcionLibre, setDescripcionLibre] = useState(initialProfile?.descripcion_negocio ?? '');
 
   // Paso 3: Propuesta enriquecida por LLM / Heurística
-  const [modulosActivos, setModulosActivos] = useState<ModuleType[]>([
-    'insumos',
-    'mano_de_obra',
-    'gas',
-    'packaging',
-  ]);
-  const [equiposDetectados, setEquiposDetectados] = useState<Equipment[]>([]);
-  const [insumosSugeridos, setInsumosSugeridos] = useState<LLMProfileExtraction['insumos_sugeridos']>([]);
-  const [preguntasSeguimiento, setPreguntasSeguimiento] = useState<LLMProfileExtraction['preguntas_seguimiento']>([]);
-  const [respuestasPreguntas, setRespuestasPreguntas] = useState<Record<string, string>>({});
-  const [resumenLLM, setResumenLLM] = useState<string>('');
-  const [fuenteAnalisis, setFuenteAnalisis] = useState<'llm_api' | 'fallback_heuristico'>('fallback_heuristico');
-  const [proveedor, setProveedor] = useState<string>('fallback');
+  const [modulosActivos, setModulosActivos] = useState<ModuleType[]>(initialProfile?.modulos_activos ?? ['mano_de_obra']);
+  const [equiposDetectados, setEquiposDetectados] = useState<Equipment[]>(initialProfile?.equipos ?? []);
+  const [insumosSugeridos, setInsumosSugeridos] = useState<LLMProfileExtraction['insumos_sugeridos']>(initialProfile?.insumos_sugeridos ?? []);
+  const [preguntasSeguimiento, setPreguntasSeguimiento] = useState<LLMProfileExtraction['preguntas_seguimiento']>(initialProfile?.preguntas_seguimiento ?? []);
+  const [respuestasPreguntas, setRespuestasPreguntas] = useState<Record<string, string>>(initialProfile?.respuestas_seguimiento ?? {});
+  const [resumenLLM, setResumenLLM] = useState<string>(initialProfile?.resumen_analisis ?? '');
+  const [fuenteAnalisis, setFuenteAnalisis] = useState<'llm_api' | 'fallback_heuristico'>(initialProfile?.fuente_analisis ?? 'fallback_heuristico');
+  const [proveedor, setProveedor] = useState<string>(initialProfile?.proveedor_analisis ?? 'fallback');
+  const cachedAnalysis = useRef<{
+    key: string;
+    proposal: LLMProfileExtraction;
+    provider: string;
+  } | null>(null);
 
   const toggleModulo = (modulo: ModuleType) => {
     if (modulosActivos.includes(modulo)) {
@@ -67,71 +70,149 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
 
   const handleAnalizarPerfil = async () => {
     setLoading(true);
+    setErrorMessage(null);
+    setAnalysisWarning(null);
+    const request = {
+      descripcion_usuario: descripcionLibre,
+      rubro_base: rubro,
+      tipo_base: tipo,
+      provincia,
+      lugar_trabajo: lugarTrabajo,
+      tiene_empleados: tieneEmpleados,
+    };
+
+    const applyProposal = (proposal: LLMProfileExtraction) => {
+      setRubro(proposal.rubro_detectado);
+      setModulosActivos(proposal.modulos_recomendados);
+      setEquiposDetectados(
+        proposal.equipos_detectados.map((equipment) => ({
+          nombre: equipment.nombre,
+          tipo_energia: equipment.tipo_energia,
+          potencia_w: equipment.potencia_w,
+          consumo_m3_h: equipment.consumo_m3_h,
+          horas_uso_estimadas: equipment.horas_uso_estimadas,
+          status: 'estimado',
+        }))
+      );
+      setInsumosSugeridos(proposal.insumos_sugeridos.map((supply) => ({
+        ...supply,
+        status: 'estimado',
+      })));
+      setPreguntasSeguimiento(proposal.preguntas_seguimiento);
+      setResumenLLM(proposal.resumen_comprension);
+      setTipo(proposal.tipo);
+    };
+
+    const requestKey = JSON.stringify(request);
+    if (cachedAnalysis.current?.key === requestKey) {
+      applyProposal(cachedAnalysis.current.proposal);
+      setFuenteAnalisis('llm_api');
+      setProveedor(cachedAnalysis.current.provider);
+      setStep(3);
+      setLoading(false);
+      return;
+    }
+
+    if (
+      initialProfile?.resumen_analisis &&
+      request.descripcion_usuario === initialProfile.descripcion_negocio &&
+      request.rubro_base === initialProfile.rubro &&
+      request.tipo_base === initialProfile.tipo &&
+      request.provincia === initialProfile.provincia &&
+      request.lugar_trabajo === initialProfile.lugar_trabajo &&
+      request.tiene_empleados === initialProfile.tiene_empleados
+    ) {
+      setRubro(initialProfile.rubro);
+      setTipo(initialProfile.tipo);
+      setModulosActivos(initialProfile.modulos_activos);
+      setEquiposDetectados(initialProfile.equipos);
+      setInsumosSugeridos(initialProfile.insumos_sugeridos);
+      setPreguntasSeguimiento(initialProfile.preguntas_seguimiento);
+      setResumenLLM(initialProfile.resumen_analisis);
+      setFuenteAnalisis(initialProfile.fuente_analisis);
+      setProveedor(initialProfile.proveedor_analisis);
+      setStep(3);
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/onboarding/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          descripcion_usuario: descripcionLibre,
-          rubro_base: rubro,
-          tipo_base: tipo,
-          provincia,
-          lugar_trabajo: lugarTrabajo,
-          tiene_empleados: tieneEmpleados,
-        }),
+        body: JSON.stringify(request),
       });
 
       if (!res.ok) {
-        throw new Error('Error al conectar con el servidor');
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? 'No pudimos consultar al asistente.');
       }
 
       const data = await res.json();
-      const prop: LLMProfileExtraction = data.perfil_propuesto;
-
-      if (prop) {
-        setModulosActivos(prop.modulos_recomendados);
-        setEquiposDetectados(
-          prop.equipos_detectados.map((e) => ({
-            nombre: e.nombre,
-            tipo_energia: e.tipo_energia,
-            potencia_w: e.potencia_w,
-            consumo_m3_h: e.consumo_m3_h,
-          }))
-        );
-        setInsumosSugeridos(prop.insumos_sugeridos);
-        setPreguntasSeguimiento(prop.preguntas_seguimiento);
-        setResumenLLM(prop.resumen_comprension);
-        setFuenteAnalisis(data.fuente);
-        setProveedor(data.proveedor || 'fallback');
-        if (prop.tipo) {
-          setTipo(prop.tipo);
-        }
+      const validation = LLMProfileExtractionSchema.safeParse(data.perfil_propuesto);
+      if (!validation.success) {
+        throw new Error('El asistente devolvió una propuesta que no se pudo validar.');
       }
+      applyProposal(validation.data);
+      setFuenteAnalisis(data.fuente);
+      setProveedor(data.proveedor || 'fallback');
+      if (data.fuente === 'llm_api') {
+        cachedAnalysis.current = {
+          key: requestKey,
+          proposal: validation.data,
+          provider: data.proveedor,
+        };
+      }
+      setAnalysisWarning(data.advertencia ?? null);
       setStep(3);
-    } catch (err) {
-      console.warn('Fallback local en cliente:', err);
-      // Caída segura en el cliente si la red o API estuviera inaccesible
+    } catch (error) {
+      applyProposal(generateDeterministicProfile(request));
+      setFuenteAnalisis('fallback_heuristico');
+      setProveedor('fallback');
+      setAnalysisWarning(error instanceof Error ? `${error.message} Se armó una propuesta local para que puedas continuar.` : 'Se armó una propuesta local para que puedas continuar.');
       setStep(3);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleConfirmarPerfil = () => {
+  const handleConfirmarPerfil = async () => {
+    if (!onProfileCreated) return;
+    setSaving(true);
+    setErrorMessage(null);
     const profile: BusinessProfile = {
+      id: initialProfile?.id,
       rubro,
       tipo,
-      moneda: 'ARS',
+      moneda: initialProfile?.moneda ?? 'ARS',
       provincia,
       tiene_empleados: tieneEmpleados,
       lugar_trabajo: lugarTrabajo,
       modulos_activos: modulosActivos,
       equipos: equiposDetectados,
-      origen: 'llm_confirmado_por_usuario',
+      descripcion_negocio: descripcionLibre,
+      preguntas_seguimiento: preguntasSeguimiento,
+      respuestas_seguimiento: respuestasPreguntas,
+      insumos_sugeridos: insumosSugeridos.map((supply) => ({
+        ...supply,
+        status: 'estimado',
+      })),
+      resumen_analisis: resumenLLM,
+      fuente_analisis: fuenteAnalisis,
+      proveedor_analisis: proveedor === 'gemini' || proveedor === 'groq' || proveedor === 'anthropic'
+        ? proveedor
+        : 'fallback',
+      origen: fuenteAnalisis === 'llm_api'
+        ? 'llm_confirmado_por_usuario'
+        : 'fallback_confirmado_por_usuario',
     };
 
-    if (onProfileCreated) {
-      onProfileCreated(profile);
+    try {
+      await onProfileCreated(profile);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'No se pudo guardar el perfil. Revisá tu conexión e intentá nuevamente.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -154,6 +235,16 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
       </CardHeader>
 
       <CardContent>
+        {analysisWarning && (
+          <p role="status" className="mb-4 rounded-xl border border-accent/30 bg-accent/10 px-3.5 py-3 text-xs text-ink">
+            {analysisWarning}
+          </p>
+        )}
+        {errorMessage && (
+          <p role="alert" className="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-3.5 py-3 text-xs text-danger">
+            {errorMessage}
+          </p>
+        )}
         {step === 1 && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -161,6 +252,7 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
                 <Label htmlFor="rubro-input" required>Rubro o actividad principal</Label>
                 <Input
                   id="rubro-input"
+                  required
                   value={rubro}
                   onChange={(e) => setRubro(e.target.value)}
                   placeholder="Ej: Panadería, Indumentaria, Carpintería"
@@ -171,6 +263,7 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
                 <Label htmlFor="provincia-input" required>Provincia (para tarifas y contexto)</Label>
                 <Input
                   id="provincia-input"
+                  required
                   value={provincia}
                   onChange={(e) => setProvincia(e.target.value)}
                   placeholder="Ej: Córdoba, CABA, Santa Fe"
@@ -204,7 +297,7 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
                 <select
                   id="lugar-trabajo"
                   value={lugarTrabajo}
-                  onChange={(e) => setLugarTrabajo(e.target.value as any)}
+                onChange={(e) => setLugarTrabajo(e.target.value as BusinessProfile['lugar_trabajo'])}
                   className="w-full min-h-[44px] rounded-xl border border-ink/15 bg-white/80 px-3.5 py-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <option value="casa">Desde mi casa</option>
@@ -235,6 +328,9 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
               <Label htmlFor="desc-libre" required>Contanos en tus palabras cómo producís y qué usás:</Label>
               <textarea
                 id="desc-libre"
+                required
+                minLength={5}
+                maxLength={3000}
                 rows={4}
                 value={descripcionLibre}
                 onChange={(e) => setDescripcionLibre(e.target.value)}
@@ -312,14 +408,94 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
                       ⚡ Equipos y Energía
                       <Badge variant="accent">estimado</Badge>
                     </span>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="space-y-2">
                       {equiposDetectados.map((eq, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium bg-canvas border border-ink/10 text-ink"
-                        >
-                          {eq.nombre} ({eq.tipo_energia === 'gas' ? 'Gas' : 'Eléctrico'})
-                        </span>
+                        <div key={`${eq.nombre}-${idx}`} className="grid grid-cols-2 gap-2 rounded-lg bg-canvas p-2.5">
+                          <Input
+                            aria-label="Nombre del equipo"
+                            value={eq.nombre}
+                            onChange={(event) => setEquiposDetectados((current) =>
+                              current.map((equipment, equipmentIndex) =>
+                                equipmentIndex === idx ? { ...equipment, nombre: event.target.value } : equipment
+                              )
+                            )}
+                            className="h-9 text-xs"
+                          />
+                          <select
+                            aria-label="Tipo de energía del equipo"
+                            value={eq.tipo_energia}
+                            onChange={(event) => setEquiposDetectados((current) =>
+                              current.map((equipment, equipmentIndex) =>
+                                equipmentIndex === idx
+                                  ? { ...equipment, tipo_energia: event.target.value as Equipment['tipo_energia'] }
+                                  : equipment
+                              )
+                            )}
+                            className="h-9 rounded-lg border border-ink/15 bg-white px-2 text-xs"
+                          >
+                            <option value="luz">Eléctrico</option>
+                            <option value="gas">Gas</option>
+                          </select>
+                          {eq.tipo_energia === 'luz' ? (
+                            <Input
+                              aria-label="Potencia del equipo en watts"
+                              type="number"
+                              min="0"
+                              placeholder="Potencia W"
+                              value={eq.potencia_w ?? ''}
+                              onChange={(event) => setEquiposDetectados((current) =>
+                                current.map((equipment, equipmentIndex) =>
+                                  equipmentIndex === idx
+                                    ? { ...equipment, potencia_w: event.target.value === '' ? undefined : Number(event.target.value) }
+                                    : equipment
+                                )
+                              )}
+                              className="h-9 text-xs"
+                            />
+                          ) : (
+                            <Input
+                              aria-label="Consumo de gas del equipo en metros cúbicos por hora"
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="Consumo m³/h"
+                              value={eq.consumo_m3_h ?? ''}
+                              onChange={(event) => setEquiposDetectados((current) =>
+                                current.map((equipment, equipmentIndex) =>
+                                  equipmentIndex === idx
+                                    ? { ...equipment, consumo_m3_h: event.target.value === '' ? undefined : Number(event.target.value) }
+                                    : equipment
+                                )
+                              )}
+                              className="h-9 text-xs"
+                            />
+                          )}
+                          <Input
+                            aria-label="Horas estimadas de uso por tanda"
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            placeholder="Horas/tanda"
+                            value={eq.horas_uso_estimadas ?? ''}
+                            onChange={(event) => setEquiposDetectados((current) =>
+                              current.map((equipment, equipmentIndex) =>
+                                equipmentIndex === idx
+                                  ? { ...equipment, horas_uso_estimadas: event.target.value === '' ? undefined : Number(event.target.value) }
+                                  : equipment
+                              )
+                            )}
+                            className="h-9 text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setEquiposDetectados((current) =>
+                              current.filter((_, equipmentIndex) => equipmentIndex !== idx)
+                            )}
+                            className="text-left text-xs text-danger underline"
+                          >
+                            Quitar equipo
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -358,7 +534,24 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
                     <div key={q.id} className="p-3.5 rounded-xl bg-canvas border border-ink/10 space-y-2 text-xs">
                       <p className="font-semibold text-ink text-sm">{q.pregunta}</p>
                       {q.ayuda && <p className="text-ink/65 text-xs">{q.ayuda}</p>}
-                      {q.opciones && q.opciones.length > 0 ? (
+                      {q.tipo === 'booleano' ? (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {['Sí', 'No'].map((answer) => (
+                            <button
+                              key={answer}
+                              type="button"
+                              onClick={() => setRespuestasPreguntas({ ...respuestasPreguntas, [q.id]: answer })}
+                              className={`min-h-[40px] rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                                respuestasPreguntas[q.id] === answer
+                                  ? 'border-primary bg-primary text-white'
+                                  : 'border-ink/15 bg-white text-ink/80'
+                              }`}
+                            >
+                              {answer}
+                            </button>
+                          ))}
+                        </div>
+                      ) : q.opciones && q.opciones.length > 0 ? (
                         <div className="flex flex-wrap gap-2 pt-1">
                           {q.opciones.map((opt) => (
                             <button
@@ -377,6 +570,7 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
                         </div>
                       ) : (
                         <Input
+                          type={q.tipo === 'numero' ? 'number' : 'text'}
                           placeholder="Tu respuesta..."
                           value={respuestasPreguntas[q.id] || ''}
                           onChange={(e) => setRespuestasPreguntas({ ...respuestasPreguntas, [q.id]: e.target.value })}
@@ -394,7 +588,12 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
 
       <CardFooter className="justify-between">
         {step > 1 ? (
-          <Button variant="outline" size="md" onClick={() => setStep((s) => (s - 1) as any)}>
+          <Button
+            variant="outline"
+            size="md"
+            disabled={loading || saving}
+            onClick={() => setStep(step === 3 ? 2 : 1)}
+          >
             Atrás
           </Button>
         ) : (
@@ -402,20 +601,20 @@ export function OnboardingInteractive({ onProfileCreated }: OnboardingInteractiv
         )}
 
         {step === 1 && (
-          <Button size="md" onClick={() => setStep(2)}>
+          <Button size="md" disabled={!rubro.trim() || !provincia.trim()} onClick={() => setStep(2)}>
             Siguiente paso
           </Button>
         )}
 
         {step === 2 && (
-          <Button size="md" onClick={handleAnalizarPerfil} disabled={loading}>
+          <Button size="md" onClick={handleAnalizarPerfil} disabled={loading || descripcionLibre.trim().length < 5}>
             {loading ? 'Analizando con asistente...' : 'Analizar y ver módulos ✨'}
           </Button>
         )}
 
         {step === 3 && (
-          <Button size="md" variant="accent" onClick={handleConfirmarPerfil}>
-            Confirmar perfil y comenzar
+          <Button size="md" variant="accent" onClick={handleConfirmarPerfil} disabled={saving}>
+            {saving ? 'Guardando perfil...' : 'Confirmar perfil y comenzar'}
           </Button>
         )}
       </CardFooter>

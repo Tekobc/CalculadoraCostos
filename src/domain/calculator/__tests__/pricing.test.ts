@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   calculatePriceFromMarkup,
   calculatePriceFromMargin,
+  calculatePriceIncludingCommission,
   calculateMarginPercentage,
   calculateMarkupPercentage,
   calculateBreakevenUnits,
@@ -36,6 +37,19 @@ describe('Pricing & Margin vs Markup Calculator', () => {
   it('throws on impossible margins', () => {
     expect(() => calculatePriceFromMargin(100, 100)).toThrow();
     expect(() => calculatePriceFromMargin(100, 105)).toThrow();
+  });
+
+  it('includes fixed per-unit costs and sales commission in the suggested price', () => {
+    const marginPrice = calculatePriceIncludingCommission(1200, 30, 5, 'margen');
+    expect(marginPrice.toFixed(2)).toBe('1846.15');
+
+    const markupPrice = calculatePriceIncludingCommission(1200, 30, 5, 'markup');
+    expect(markupPrice.toFixed(2)).toBe('1642.11');
+  });
+
+  it('rejects a margin and commission that consume the full sale price', () => {
+    expect(() => calculatePriceIncludingCommission(100, 95, 5, 'margen')).toThrow();
+    expect(() => calculatePriceIncludingCommission(100, 30, 100, 'markup')).toThrow();
   });
 
   it('calculates breakeven point in units', () => {

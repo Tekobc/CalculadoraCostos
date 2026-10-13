@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge';
 import { formatCurrencyARS } from '@/lib/formatters/currency';
 import { calculateSupplyItemCost } from '@/domain/calculator/supplies';
 import { SupplyItem } from '@/domain/schemas/costs.schema';
+import { Product } from '@/domain/schemas/product.schema';
+import { BusinessProfile } from '@/domain/schemas/profile.schema';
 
 interface QuickSupply {
   id: string;
@@ -25,17 +27,26 @@ interface QuickSupply {
 }
 
 interface QuickUnitCostCalculatorProps {
-  onSaveAsProduct?: (newProduct: any) => void;
+  onSaveAsProduct?: (newProduct: Product) => void;
+  profile?: BusinessProfile | null;
+  isDemo?: boolean;
 }
 
-export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalculatorProps = {}) {
-  const [unidadesLote, setUnidadesLote] = useState<string>('12');
-  const [manoDeObraHoras, setManoDeObraHoras] = useState<string>('2');
-  const [costoHoraMo, setCostoHoraMo] = useState<string>('3000');
+export function QuickUnitCostCalculator({
+  onSaveAsProduct,
+  profile,
+  isDemo = true,
+}: QuickUnitCostCalculatorProps = {}) {
+  const activeModules = profile?.modulos_activos;
+  const useSupplies = !activeModules || activeModules.includes('insumos');
+  const useLabor = !activeModules || activeModules.includes('mano_de_obra') || activeModules.includes('servicios');
+  const [unidadesLote, setUnidadesLote] = useState<string>(isDemo ? '12' : '1');
+  const [manoDeObraHoras, setManoDeObraHoras] = useState<string>(isDemo ? '2' : '0');
+  const [costoHoraMo, setCostoHoraMo] = useState<string>(isDemo ? '3000' : '0');
 
-  const [supplies, setSupplies] = useState<QuickSupply[]>([
+  const [supplies, setSupplies] = useState<QuickSupply[]>(isDemo && useSupplies ? [
     {
-      id: '1',
+      id: '00000000-0000-4000-8000-000000000201',
       nombre: 'Harina 0000',
       cantidadCompra: '1',
       unidadCompra: 'kg',
@@ -47,7 +58,7 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
       status: 'confirmado',
     },
     {
-      id: '2',
+      id: '00000000-0000-4000-8000-000000000202',
       nombre: 'Manteca',
       cantidadCompra: '200',
       unidadCompra: 'gr',
@@ -58,13 +69,13 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
       merma: '5',
       status: 'estimado',
     },
-  ]);
+  ] : []);
 
   const addSupply = () => {
     setSupplies([
       ...supplies,
       {
-        id: Math.random().toString(),
+        id: crypto.randomUUID(),
         nombre: 'Nuevo Insumo',
         cantidadCompra: '1',
         unidadCompra: 'unidad',
@@ -106,7 +117,7 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
 
       if (pCompra >= 0 && cCompra > 0 && cUso > 0 && factor > 0) {
         cost = calculateSupplyItemCost(pCompra, cCompra, cUso, factor, merma);
-        totalInsumos = totalInsumos.plus(cost);
+        if (useSupplies) totalInsumos = totalInsumos.plus(cost);
       }
     } catch {
       // ignore
@@ -117,7 +128,7 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
   const unidades = Math.max(1, parseFloat(unidadesLote) || 1);
   const horasMo = parseFloat(manoDeObraHoras) || 0;
   const tarifaMo = parseFloat(costoHoraMo) || 0;
-  const totalMo = new Decimal(horasMo).times(tarifaMo);
+  const totalMo = useLabor ? new Decimal(horasMo).times(tarifaMo) : new Decimal(0);
 
   const costoTotalLote = totalInsumos.plus(totalMo);
   const costoUnitario = costoTotalLote.dividedBy(unidades);
@@ -150,6 +161,7 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
             />
           </div>
 
+          {useLabor && <>
           <div>
             <Label htmlFor="mo-horas">Tiempo dedicado (horas)</Label>
             <Input
@@ -173,10 +185,11 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
               onChange={(e) => setCostoHoraMo(e.target.value)}
             />
           </div>
+          </>}
         </div>
 
         {/* Tabla de insumos */}
-        <div className="space-y-3">
+        {useSupplies && <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="font-semibold text-ink text-sm sm:text-base">Insumos y Materias Primas</h4>
             <Button size="sm" variant="outline" onClick={addSupply}>
@@ -267,7 +280,7 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
               </div>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* Resumen Final */}
         <div className="bg-canvas rounded-2xl p-5 border border-ink/10 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -292,13 +305,13 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  const newProd = {
-                    id: Math.random().toString(36).substring(2, 9),
+                  const newProd: Product = {
+                    id: crypto.randomUUID(),
                     nombre: 'Receta Calculada',
-                    tipo: 'producto',
+                    tipo: profile?.tipo === 'servicio' ? 'servicio' : 'producto',
                     unidades_lote_base: unidades,
                     insumos: supplies.map((s) => ({
-                      id: Math.random().toString(),
+                      id: crypto.randomUUID(),
                       nombre: s.nombre,
                       cantidad_compra: parseFloat(s.cantidadCompra) || 1,
                       unidad_compra: s.unidadCompra,
@@ -315,6 +328,8 @@ export function QuickUnitCostCalculator({ onSaveAsProduct }: QuickUnitCostCalcul
                     consumo_gas: [],
                     tiempo_produccion_horas: horasMo,
                     costo_hora_mano_obra: tarifaMo,
+                    costos_fijos_unitarios: 0,
+                    impuestos_comisiones_porcentaje: 0,
                     estrategia_precio: 'margen',
                     porcentaje_objetivo: 35,
                     fecha_creacion: new Date().toISOString(),

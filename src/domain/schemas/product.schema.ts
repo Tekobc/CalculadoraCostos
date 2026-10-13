@@ -23,6 +23,8 @@ export const ProductSchema = z.object({
   // Mano de obra
   tiempo_produccion_horas: z.number().nonnegative().default(0),
   costo_hora_mano_obra: z.number().nonnegative().default(0),
+  costos_fijos_unitarios: z.number().nonnegative().default(0),
+  impuestos_comisiones_porcentaje: z.number().min(0).max(99.9).default(0),
   
   // Parámetros de precio y rentabilidad
   estrategia_precio: PricingModeSchema.default('margen'),

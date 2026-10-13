@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { OnboardingInteractive } from '@/components/onboarding/onboarding-interactive';
 import { QuickUnitCostCalculator } from '@/components/calculator/quick-unit-cost';
 import { PricingSimulator } from '@/components/calculator/pricing-simulator';
@@ -8,18 +8,20 @@ import { ProductCatalogManager } from '@/components/calculator/product-catalog-m
 import { CostVariationSimulator } from '@/components/calculator/cost-variation-simulator';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { Badge } from '@/components/ui/badge';
-import { BusinessProfile } from '@/domain/schemas/profile.schema';
+import { BusinessProfile, BusinessProfileSchema, ModuleType } from '@/domain/schemas/profile.schema';
 import { Product } from '@/domain/schemas/product.schema';
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { getBusinessProfile, getUserProducts, saveBusinessProfile, saveProduct } from '@/lib/supabase/db-actions';
 
 const INITIAL_PRODUCTS: Product[] = [
   {
-    id: 'prod-1',
+    id: '00000000-0000-4000-8000-000000000001',
     nombre: 'Docena de Alfajores de Maicena',
     tipo: 'producto',
     unidades_lote_base: 12,
     insumos: [
       {
-        id: 'ins-1',
+        id: '00000000-0000-4000-8000-000000000101',
         nombre: 'Almidón de maíz (Maicena)',
         cantidad_compra: 1,
         unidad_compra: 'kg',
@@ -32,7 +34,7 @@ const INITIAL_PRODUCTS: Product[] = [
         status: 'confirmado',
       },
       {
-        id: 'ins-2',
+        id: '00000000-0000-4000-8000-000000000102',
         nombre: 'Dulce de leche repostero',
         cantidad_compra: 1,
         unidad_compra: 'kg',
@@ -45,7 +47,7 @@ const INITIAL_PRODUCTS: Product[] = [
         status: 'confirmado',
       },
       {
-        id: 'ins-3',
+        id: '00000000-0000-4000-8000-000000000103',
         nombre: 'Manteca de primera calidad',
         cantidad_compra: 200,
         unidad_compra: 'gr',
@@ -63,19 +65,21 @@ const INITIAL_PRODUCTS: Product[] = [
     consumo_gas: [],
     tiempo_produccion_horas: 1.5,
     costo_hora_mano_obra: 3500,
+    costos_fijos_unitarios: 0,
+    impuestos_comisiones_porcentaje: 0,
     estrategia_precio: 'margen',
     porcentaje_objetivo: 35,
     fecha_creacion: new Date().toISOString(),
     fecha_actualizacion: new Date().toISOString(),
   },
   {
-    id: 'prod-2',
+    id: '00000000-0000-4000-8000-000000000002',
     nombre: 'Torta Brownie con Nuez (20cm)',
     tipo: 'producto',
     unidades_lote_base: 1,
     insumos: [
       {
-        id: 'ins-4',
+        id: '00000000-0000-4000-8000-000000000104',
         nombre: 'Chocolate semiamargo',
         cantidad_compra: 1,
         unidad_compra: 'kg',
@@ -88,7 +92,7 @@ const INITIAL_PRODUCTS: Product[] = [
         status: 'confirmado',
       },
       {
-        id: 'ins-5',
+        id: '00000000-0000-4000-8000-000000000105',
         nombre: 'Nueces mariposa',
         cantidad_compra: 500,
         unidad_compra: 'gr',
@@ -106,6 +110,8 @@ const INITIAL_PRODUCTS: Product[] = [
     consumo_gas: [],
     tiempo_produccion_horas: 1,
     costo_hora_mano_obra: 3500,
+    costos_fijos_unitarios: 0,
+    impuestos_comisiones_porcentaje: 0,
     estrategia_precio: 'margen',
     porcentaje_objetivo: 40,
     fecha_creacion: new Date().toISOString(),
@@ -118,16 +124,162 @@ export default function HomePage() {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(isSupabaseConfigured());
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const productsRef = useRef(INITIAL_PRODUCTS);
+  const productSaveQueue = useRef(new Map<string, Promise<void>>());
 
-  const handleProfileCreated = (newProfile: BusinessProfile) => {
-    setProfile(newProfile);
-    setActiveTab('products');
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('authError') !== 'confirmation') return;
+
+    setAuthNotice('No se pudo confirmar el correo. El enlace puede haber vencido; solicitá uno nuevo o iniciá sesión.');
+    url.searchParams.delete('authError');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured()) {
+      setAuthLoading(false);
+      return;
+    }
+
+    const supabase = createClient();
+    let active = true;
+
+    void supabase.auth.getUser().then(({ data, error }) => {
+      if (!active) return;
+      if (error && error.name !== 'AuthSessionMissingError') {
+        setCloudError(error.message);
+      }
+      setUserId(data.user?.id ?? null);
+      setUserEmail(data.user?.email ?? null);
+      setAuthLoading(false);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setCloudError(error instanceof Error ? error.message : 'No se pudo comprobar la sesión.');
+      setAuthLoading(false);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+      setUserEmail(session?.user?.email ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!userId) {
+      setProfile(null);
+      productsRef.current = INITIAL_PRODUCTS;
+      setProducts(INITIAL_PRODUCTS);
+      setAccountLoading(false);
+      return;
+    }
+
+    let active = true;
+    setAccountLoading(true);
+    setCloudError(null);
+
+    void Promise.all([getBusinessProfile(), getUserProducts()])
+      .then(([profileResult, productsResult]) => {
+        if (!active) return;
+        const loadErrors = [profileResult.error, productsResult.error]
+          .filter((error): error is string => Boolean(error));
+        if (loadErrors.length > 0) setCloudError([...new Set(loadErrors)].join(' '));
+        setProfile(profileResult.profile);
+        productsRef.current = productsResult.products;
+        setProducts(productsResult.products);
+        if (!profileResult.error) {
+          setActiveTab(profileResult.profile ? 'products' : 'onboarding');
+        }
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setCloudError(error instanceof Error ? error.message : 'No se pudieron cargar los datos de la cuenta.');
+      })
+      .finally(() => {
+        if (active) setAccountLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [authLoading, userId]);
+
+  const handleProfileCreated = async (newProfile: BusinessProfile) => {
+    setSyncing(true);
+    try {
+      const result = await saveBusinessProfile(newProfile);
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      const validation = BusinessProfileSchema.safeParse(result.profile);
+      if (!validation.success) {
+        throw new Error('El perfil se guardó, pero no pudimos validar la respuesta de Supabase.');
+      }
+      setProfile(validation.data);
+      setCloudError(null);
+      setActiveTab('products');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleProductsChange = (nextProducts: Product[]) => {
+    const productsWithIds = nextProducts.map((product) =>
+      product.id ? product : { ...product, id: crypto.randomUUID() }
+    );
+    const changed = productsWithIds.filter((nextProduct) => {
+      const previousProduct = productsRef.current.find((product) => product.id === nextProduct.id);
+      return !previousProduct || JSON.stringify(previousProduct) !== JSON.stringify(nextProduct);
+    });
+
+    productsRef.current = productsWithIds;
+    setProducts(productsWithIds);
+    if (!userId || changed.length === 0) return;
+
+    setSyncing(true);
+    const writes = changed.map((product) => {
+      const key = product.id;
+      if (!key) throw new Error('No se pudo sincronizar un producto sin identificador.');
+      const previousWrite = productSaveQueue.current.get(key) ?? Promise.resolve();
+      const write = previousWrite.catch(() => undefined).then(async () => {
+        const result = await saveProduct(product);
+        if (result.error) throw new Error(result.error);
+      });
+      productSaveQueue.current.set(key, write);
+      void write.then(() => {
+        setCloudError(null);
+      }).catch((error: unknown) => {
+        setCloudError(error instanceof Error ? `No se pudo sincronizar un producto: ${error.message}` : 'No se pudieron sincronizar los productos.');
+      }).finally(() => {
+        if (productSaveQueue.current.get(key) === write) {
+          productSaveQueue.current.delete(key);
+        }
+        if (productSaveQueue.current.size === 0) setSyncing(false);
+      });
+      return write;
+    });
+    void Promise.allSettled(writes);
   };
 
   const handleApplySimulatedProduct = (updatedProduct: Product) => {
-    setProducts(products.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)));
+    handleProductsChange(products.map((product) => product.id === updatedProduct.id ? updatedProduct : product));
     setActiveTab('products');
   };
+
+  const moduleEnabled = (module: ModuleType) => !profile || profile.modulos_activos.includes(module);
 
   // Contar insumos con advertencia de inflación en el catálogo
   const totalInsumosDesactualizados = products.reduce((acc, p) => {
@@ -167,10 +319,12 @@ export default function HomePage() {
           {profile ? (
             <div className="flex items-center gap-2 bg-white/80 px-3.5 py-2 rounded-xl border border-ink/10 shadow-sm text-xs">
               <span className="font-semibold text-ink">{profile.rubro}</span>
-              <Badge variant="accent">Perfil activo</Badge>
+              <Badge variant={syncing ? 'support' : 'accent'}>
+                {syncing ? 'Sincronizando…' : 'Perfil activo'}
+              </Badge>
             </div>
           ) : (
-            <Badge variant="support">Modo emprendedor</Badge>
+            <Badge variant="support">{userEmail ? 'Perfil pendiente' : 'Modo demostración'}</Badge>
           )}
         </div>
       </header>
@@ -185,10 +339,10 @@ export default function HomePage() {
               : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
           }`}
         >
-          🍰 Mis Productos y Recetas
+          {profile?.tipo === 'servicio' ? '🧰 Mis servicios' : '🍰 Mis Productos y Recetas'}
         </button>
 
-        <button
+        {products.length > 0 && (moduleEnabled('insumos') || moduleEnabled('mano_de_obra')) && <button
           onClick={() => setActiveTab('simulator')}
           className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
             activeTab === 'simulator'
@@ -197,9 +351,9 @@ export default function HomePage() {
           }`}
         >
           ⚡ Alertas y Variación de Costos
-        </button>
+        </button>}
 
-        <button
+        {(moduleEnabled('insumos') || moduleEnabled('servicios')) && <button
           onClick={() => setActiveTab('pricing')}
           className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
             activeTab === 'pricing'
@@ -208,9 +362,9 @@ export default function HomePage() {
           }`}
         >
           📈 Margen vs Markup
-        </button>
+        </button>}
 
-        <button
+        {(moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios')) && <button
           onClick={() => setActiveTab('calculator')}
           className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
             activeTab === 'calculator'
@@ -219,17 +373,17 @@ export default function HomePage() {
           }`}
         >
           🥣 Calculadora de Tanda Rápida
-        </button>
+        </button>}
 
         <button
-          onClick={() => setActiveTab('onboarding')}
+          onClick={() => setActiveTab(userId ? 'onboarding' : 'auth')}
           className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
             activeTab === 'onboarding'
               ? 'bg-primary text-white shadow-sm'
               : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
           }`}
         >
-          ✨ Configuración y Onboarding
+          ✨ {profile ? 'Editar mi perfil' : 'Configurar emprendimiento'}
         </button>
 
         <button
@@ -246,9 +400,36 @@ export default function HomePage() {
 
       {/* Contenido dinámico */}
       <section className="space-y-6">
+        {authNotice && (
+          <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {authNotice}
+          </p>
+        )}
+        {cloudError && (
+          <p role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {cloudError}
+          </p>
+        )}
+        {(authLoading || accountLoading) && (
+          <p role="status" className="rounded-xl bg-white/70 px-4 py-5 text-sm text-ink/70">
+            Cargando los datos de tu cuenta…
+          </p>
+        )}
+        {!authLoading && !accountLoading && (
+        <>
         {activeTab === 'products' && (
           <div className="space-y-6">
-            <ProductCatalogManager products={products} onProductsChange={setProducts} />
+            {profile && profile.modulos_activos.length === 0 ? (
+              <p className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-ink">
+                Activá al menos un módulo en tu perfil para gestionar costos.
+              </p>
+            ) : (
+              <ProductCatalogManager
+                products={products}
+                profile={profile}
+                onProductsChange={handleProductsChange}
+              />
+            )}
           </div>
         )}
 
@@ -270,8 +451,10 @@ export default function HomePage() {
         {activeTab === 'calculator' && (
           <div className="space-y-6">
             <QuickUnitCostCalculator
+              profile={profile}
+              isDemo={!userId}
               onSaveAsProduct={(newProd) => {
-                setProducts([newProd, ...products]);
+                handleProductsChange([newProd, ...products]);
                 setActiveTab('products');
               }}
             />
@@ -280,7 +463,27 @@ export default function HomePage() {
 
         {activeTab === 'onboarding' && (
           <div className="space-y-6">
-            <OnboardingInteractive onProfileCreated={handleProfileCreated} />
+            {userId ? (
+              <OnboardingInteractive
+                key={profile?.id ?? 'new-profile'}
+                initialProfile={profile}
+                onProfileCreated={handleProfileCreated}
+              />
+            ) : (
+              <div className="rounded-2xl border border-ink/10 bg-white/80 p-6 space-y-3">
+                <h2 className="text-lg font-bold text-ink">Primero, tu cuenta</h2>
+                <p className="text-sm text-ink/70">
+                  Creá una cuenta o iniciá sesión para guardar el perfil y tus costos de forma privada.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('auth')}
+                  className="min-h-[44px] rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Crear cuenta o ingresar
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -293,6 +496,8 @@ export default function HomePage() {
               }}
             />
           </div>
+        )}
+        </>
         )}
       </section>
 

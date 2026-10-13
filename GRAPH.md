@@ -1,4 +1,4 @@
-# Repository Architecture Graph & Feature Log (Graphify)
+  # Repository Architecture Graph & Feature Log (Graphify)
 
 Este documento registra los nodos arquitectónicos y el mapa de dependencias actualizado por cada feature implementada.
 

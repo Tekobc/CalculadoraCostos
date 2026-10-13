@@ -89,6 +89,8 @@ describe('Inflation & Price Staleness Calculator', () => {
       consumo_gas: [],
       tiempo_produccion_horas: 1,
       costo_hora_mano_obra: 2000,
+      costos_fijos_unitarios: 0,
+      impuestos_comisiones_porcentaje: 0,
       estrategia_precio: 'margen',
       porcentaje_objetivo: 30,
     };

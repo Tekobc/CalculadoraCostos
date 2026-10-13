@@ -1,85 +1,87 @@
-import { LLMExtractionRequest, LLMProfileExtraction, LLMProfileExtractionSchema } from './schemas';
+import {
+  LLMExtractionRequest,
+  LLMProfileExtraction,
+  LLMProfileExtractionSchema,
+} from './schemas';
 import { ONBOARDING_SYSTEM_PROMPT, buildExtractionUserPrompt } from './prompts';
 import { generateDeterministicProfile } from './fallback';
 
 export interface ExtractionResult {
   data: LLMProfileExtraction;
   source: 'llm_api' | 'fallback_heuristico';
-  provider?: 'gemini' | 'groq' | 'anthropic' | 'fallback';
+  provider: 'gemini' | 'groq' | 'anthropic' | 'fallback';
   error?: string;
 }
 
-/**
- * Cliente multimodelo con soporte para proveedores con Free Tier generoso:
- * 1. Google Gemini Flash (GEMINI_API_KEY) -> Gratuito (Google AI Studio)
- * 2. Groq Llama 3 (GROQ_API_KEY) -> Gratuito y ultra rápido
- * 3. Anthropic Claude (ANTHROPIC_API_KEY) -> Pago
- * 4. Fallback Heurístico local -> 100% gratuito, offline y sin API keys
- */
-export async function extractProfileWithLLM(request: LLMExtractionRequest): Promise<ExtractionResult> {
-  const geminiKey = process.env.GEMINI_API_KEY;
-  const groqKey = process.env.GROQ_API_KEY;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+function getFallback(request: LLMExtractionRequest, error?: string): ExtractionResult {
+  return {
+    data: generateDeterministicProfile(request),
+    source: 'fallback_heuristico',
+    provider: 'fallback',
+    error,
+  };
+}
 
-  // 1. Google Gemini (Free Tier en Google AI Studio)
-  if (geminiKey) {
-    try {
-      const userPrompt = buildExtractionUserPrompt(request);
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+function parseJson(text: string | undefined): LLMProfileExtraction | null {
+  if (!text) return null;
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: ONBOARDING_SYSTEM_PROMPT }],
-          },
-          contents: [
-            {
-              parts: [{ text: userPrompt }],
-            },
-          ],
-          generationConfig: {
-            response_mime_type: 'application/json',
-            temperature: 0.2,
-          },
-        }),
-      });
-
-      if (res.ok) {
-        const payload = await res.json();
-        const rawText = payload.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawText) {
-          const parsed = JSON.parse(rawText);
-          const validated = LLMProfileExtractionSchema.safeParse(parsed);
-          if (validated.success) {
-            return {
-              data: validated.data,
-              source: 'llm_api',
-              provider: 'gemini',
-            };
-          }
-        }
-      }
-      console.warn('Gemini falló o devolvió esquema inválido, evaluando alternativas...');
-    } catch (err: any) {
-      console.warn('Error llamando a Gemini:', err?.message);
-    }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const result = LLMProfileExtractionSchema.safeParse(parsed);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
   }
+}
 
-  // 2. Groq (Free Tier con Llama-3.3-70b-versatile)
-  if (groqKey) {
-    try {
-      const userPrompt = buildExtractionUserPrompt(request);
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+export async function extractProfileWithLLM(
+  request: LLMExtractionRequest
+): Promise<ExtractionResult> {
+  const userPrompt = buildExtractionUserPrompt(request);
+  const timeout = AbortSignal.timeout(15000);
+
+  try {
+    if (process.env.GEMINI_API_KEY) {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: timeout,
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: ONBOARDING_SYSTEM_PROMPT }] },
+            contents: [{ parts: [{ text: userPrompt }] }],
+            generationConfig: {
+              response_mime_type: 'application/json',
+              temperature: 0.2,
+              maxOutputTokens: 1400,
+            },
+          }),
+        }
+      );
+      if (!response.ok) {
+        return getFallback(request, `El análisis con Gemini no estuvo disponible (${response.status}).`);
+      }
+
+      const payload = await response.json();
+      const data = parseJson(payload.candidates?.[0]?.content?.parts?.[0]?.text);
+      return data
+        ? { data, source: 'llm_api', provider: 'gemini' }
+        : getFallback(request, 'Gemini devolvió una propuesta con formato inválido.');
+    }
+
+    if (process.env.GROQ_API_KEY) {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${groqKey}`,
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
         },
+        signal: timeout,
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           temperature: 0.2,
+          max_tokens: 1400,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: ONBOARDING_SYSTEM_PROMPT },
@@ -87,74 +89,52 @@ export async function extractProfileWithLLM(request: LLMExtractionRequest): Prom
           ],
         }),
       });
-
-      if (res.ok) {
-        const payload = await res.json();
-        const rawContent = payload.choices?.[0]?.message?.content;
-        if (rawContent) {
-          const parsed = JSON.parse(rawContent);
-          const validated = LLMProfileExtractionSchema.safeParse(parsed);
-          if (validated.success) {
-            return {
-              data: validated.data,
-              source: 'llm_api',
-              provider: 'groq',
-            };
-          }
-        }
+      if (!response.ok) {
+        return getFallback(request, `El análisis con Groq no estuvo disponible (${response.status}).`);
       }
-      console.warn('Groq falló o devolvió esquema inválido...');
-    } catch (err: any) {
-      console.warn('Error llamando a Groq:', err?.message);
-    }
-  }
 
-  // 3. Anthropic Claude (Opción de pago)
-  if (anthropicKey) {
-    try {
-      const userPrompt = buildExtractionUserPrompt(request);
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const payload = await response.json();
+      const data = parseJson(payload.choices?.[0]?.message?.content);
+      return data
+        ? { data, source: 'llm_api', provider: 'groq' }
+        : getFallback(request, 'Groq devolvió una propuesta con formato inválido.');
+    }
+
+    if (process.env.ANTHROPIC_API_KEY) {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
           'anthropic-version': '2023-06-01',
         },
+        signal: timeout,
         body: JSON.stringify({
-          model: 'claude-3-5-haiku-20241022',
-          max_tokens: 1000,
+          model: 'claude-haiku-5-5',
+          max_tokens: 1400,
           system: ONBOARDING_SYSTEM_PROMPT,
           messages: [{ role: 'user', content: userPrompt }],
         }),
       });
-
-      if (res.ok) {
-        const payload = await res.json();
-        const contentBlock = payload.content?.[0]?.text;
-        if (contentBlock) {
-          const jsonMatch = contentBlock.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            const validated = LLMProfileExtractionSchema.safeParse(parsed);
-            if (validated.success) {
-              return {
-                data: validated.data,
-                source: 'llm_api',
-                provider: 'anthropic',
-              };
-            }
-          }
-        }
+      if (!response.ok) {
+        return getFallback(request, `El análisis con Anthropic no estuvo disponible (${response.status}).`);
       }
-    } catch (err: any) {
-      console.warn('Error llamando a Anthropic:', err?.message);
-    }
-  }
 
-  // 4. Fallback Heurístico (100% Gratis, local, instantáneo y sin API Key)
-  return {
-    data: generateDeterministicProfile(request),
-    source: 'fallback_heuristico',
-    provider: 'fallback',
-  };
+      const payload = await response.json();
+      const rawText = payload.content?.[0]?.text as string | undefined;
+      const text = rawText?.match(/\{[\s\S]*\}/)?.[0];
+      const data = parseJson(text);
+      return data
+        ? { data, source: 'llm_api', provider: 'anthropic' }
+        : getFallback(request, 'Anthropic devolvió una propuesta con formato inválido.');
+    }
+
+    return getFallback(request);
+  } catch (error) {
+    const message = error instanceof Error && error.name === 'TimeoutError'
+      ? 'El análisis tardó demasiado y se usó el modo sin conexión.'
+      : 'No se pudo conectar con el asistente y se usó el modo sin conexión.';
+    console.error('Error en la extracción del perfil:', error);
+    return getFallback(request, message);
+  }
 }

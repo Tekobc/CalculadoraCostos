@@ -4,6 +4,20 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { BusinessProfile, BusinessProfileSchema } from '@/domain/schemas/profile.schema';
 import { Product, ProductSchema } from '@/domain/schemas/product.schema';
 import { revalidatePath } from 'next/cache';
+import { randomUUID } from 'crypto';
+
+function describeDatabaseError(error: { code?: string; message: string }): string {
+  if (error.code === 'PGRST205') {
+    return 'Supabase no encuentra las tablas de la app. Ejecutá src/lib/supabase/schema.sql en el SQL Editor; si ya lo hiciste, verificá que public esté expuesto en la Data API y recargá su esquema.';
+  }
+  if (error.code === 'PGRST204') {
+    return 'La base de datos no tiene una columna que esta versión necesita. Volvé a ejecutar src/lib/supabase/schema.sql en el SQL Editor.';
+  }
+  if (error.code === '42501') {
+    return 'Supabase rechazó el acceso a los datos. Revisá que las políticas RLS y los permisos de src/lib/supabase/schema.sql estén aplicados.';
+  }
+  return error.message;
+}
 
 /**
  * Guarda o actualiza el perfil de negocio del usuario autenticado.
@@ -35,14 +49,21 @@ export async function saveBusinessProfile(profile: BusinessProfile) {
       lugar_trabajo: validation.data.lugar_trabajo,
       modulos_activos: validation.data.modulos_activos,
       equipos: validation.data.equipos,
+      descripcion_negocio: validation.data.descripcion_negocio ?? '',
+      preguntas_seguimiento: validation.data.preguntas_seguimiento,
+      respuestas_seguimiento: validation.data.respuestas_seguimiento,
+      insumos_sugeridos: validation.data.insumos_sugeridos,
+      resumen_analisis: validation.data.resumen_analisis,
+      fuente_analisis: validation.data.fuente_analisis,
+      proveedor_analisis: validation.data.proveedor_analisis,
       origen: validation.data.origen,
       updated_at: new Date().toISOString(),
-    })
+    }, { onConflict: 'user_id' })
     .select()
     .single();
 
   if (error) {
-    return { error: error.message };
+    return { error: describeDatabaseError(error) };
   }
 
   revalidatePath('/', 'layout');
@@ -52,23 +73,28 @@ export async function saveBusinessProfile(profile: BusinessProfile) {
 /**
  * Obtiene el perfil del usuario autenticado.
  */
-export async function getBusinessProfile(): Promise<BusinessProfile | null> {
+export async function getBusinessProfile(): Promise<{ profile: BusinessProfile | null; error?: string }> {
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return null;
+  if (!user) return { profile: null };
 
   const { data, error } = await supabase
     .from('business_profiles')
     .select('*')
     .eq('user_id', user.id)
-    .single();
+    .maybeSingle();
 
-  if (error || !data) return null;
+  if (error) return { profile: null, error: describeDatabaseError(error) };
+  if (!data) return { profile: null };
 
-  return data as BusinessProfile;
+  const validation = BusinessProfileSchema.safeParse(data);
+  if (!validation.success) {
+    return { profile: null, error: 'El perfil guardado no tiene un formato válido.' };
+  }
+  return { profile: validation.data };
 }
 
 /**
@@ -89,10 +115,11 @@ export async function saveProduct(product: Product) {
     return { error: 'Debe iniciar sesión para guardar productos' };
   }
 
+  const productId = validation.data.id ?? randomUUID();
   const { data, error } = await supabase
     .from('products')
     .upsert({
-      id: validation.data.id || undefined,
+      id: productId,
       user_id: user.id,
       nombre: validation.data.nombre,
       descripcion: validation.data.descripcion,
@@ -105,32 +132,43 @@ export async function saveProduct(product: Product) {
       consumo_gas: validation.data.consumo_gas,
       tiempo_produccion_horas: validation.data.tiempo_produccion_horas,
       costo_hora_mano_obra: validation.data.costo_hora_mano_obra,
+      costos_fijos_unitarios: validation.data.costos_fijos_unitarios,
+      impuestos_comisiones_porcentaje: validation.data.impuestos_comisiones_porcentaje,
       estrategia_precio: validation.data.estrategia_precio,
       porcentaje_objetivo: validation.data.porcentaje_objetivo,
       precio_venta_sugerido: validation.data.precio_venta_sugerido,
       updated_at: new Date().toISOString(),
-    })
+    }, { onConflict: 'id' })
     .select()
     .single();
 
   if (error) {
-    return { error: error.message };
+    return { error: describeDatabaseError(error) };
   }
 
   revalidatePath('/', 'layout');
-  return { success: true, product: data };
+  const savedProduct = ProductSchema.safeParse({
+    ...data,
+    descripcion: data.descripcion ?? undefined,
+    fecha_creacion: data.created_at,
+    fecha_actualizacion: data.updated_at,
+  });
+  if (!savedProduct.success) {
+    return { error: 'El producto se guardó, pero la respuesta de la base no es válida.' };
+  }
+  return { success: true, product: savedProduct.data };
 }
 
 /**
  * Obtiene la lista de productos del usuario autenticado.
  */
-export async function getUserProducts(): Promise<Product[]> {
+export async function getUserProducts(): Promise<{ products: Product[]; error?: string }> {
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return [];
+  if (!user) return { products: [] };
 
   const { data, error } = await supabase
     .from('products')
@@ -138,7 +176,17 @@ export async function getUserProducts(): Promise<Product[]> {
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
-  if (error || !data) return [];
+  if (error) return { products: [], error: describeDatabaseError(error) };
 
-  return data as Product[];
+  const products = data.map((row) => ProductSchema.safeParse({
+    ...row,
+    descripcion: row.descripcion ?? undefined,
+    fecha_creacion: row.created_at,
+    fecha_actualizacion: row.updated_at,
+  }));
+  const invalidProduct = products.find((product) => !product.success);
+  if (invalidProduct && !invalidProduct.success) {
+    return { products: [], error: 'Hay productos guardados con datos inválidos.' };
+  }
+  return { products: products.map((product) => product.success ? product.data : null).filter((product): product is Product => product !== null) };
 }

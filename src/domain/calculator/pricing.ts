@@ -47,6 +47,35 @@ export function calculatePriceFromMargin(
   return c.dividedBy(factor);
 }
 
+export function calculatePriceIncludingCommission(
+  costo: number | Decimal,
+  porcentajeObjetivo: number | Decimal,
+  comisionPorcentaje: number | Decimal,
+  estrategia: 'margen' | 'markup'
+): Decimal {
+  const c = new Decimal(costo);
+  const target = new Decimal(porcentajeObjetivo);
+  const commission = new Decimal(comisionPorcentaje);
+
+  if (c.isNegative() || target.isNegative() || commission.isNegative()) {
+    throw new Error('Costo, objetivo y comisión no pueden ser negativos');
+  }
+  if (commission.greaterThanOrEqualTo(100)) {
+    throw new Error('La comisión debe ser menor al 100%');
+  }
+
+  if (estrategia === 'markup') {
+    return c.times(new Decimal(1).plus(target.dividedBy(100)))
+      .dividedBy(new Decimal(1).minus(commission.dividedBy(100)));
+  }
+
+  const remaining = new Decimal(1).minus(target.plus(commission).dividedBy(100));
+  if (remaining.lessThanOrEqualTo(0)) {
+    throw new Error('El margen más la comisión debe ser menor al 100%');
+  }
+  return c.dividedBy(remaining);
+}
+
 /**
  * Margen porcentual a partir de costo y precio:
  *   margen = ((precio - costo) / precio) * 100

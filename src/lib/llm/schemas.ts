@@ -40,7 +40,7 @@ export const LLMProfileExtractionSchema = z.object({
 export type LLMProfileExtraction = z.infer<typeof LLMProfileExtractionSchema>;
 
 export const LLMExtractionRequestSchema = z.object({
-  descripcion_usuario: z.string().min(5, 'La descripción debe tener al menos 5 caracteres'),
+  descripcion_usuario: z.string().trim().min(5, 'La descripción debe tener al menos 5 caracteres').max(3000),
   rubro_base: z.string().optional(),
   tipo_base: z.enum(['producto', 'servicio', 'mixto']).optional(),
   provincia: z.string().optional(),

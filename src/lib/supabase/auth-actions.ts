@@ -2,19 +2,25 @@
 
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 
 export async function signInWithEmail(formData: FormData) {
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
+  const validation = z.object({
+    email: z.string().email(),
+    password: z.string().min(1),
+  }).safeParse({
+    email: formData.get('email'),
+    password: formData.get('password'),
+  });
 
-  if (!email || !password) {
-    return { error: 'El email y la contraseña son obligatorios' };
+  if (!validation.success) {
+    return { error: 'Ingresá un email válido y tu contraseña.' };
   }
 
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
+    email: validation.data.email,
+    password: validation.data.password,
   });
 
   if (error) {
@@ -26,17 +32,22 @@ export async function signInWithEmail(formData: FormData) {
 }
 
 export async function signUpWithEmail(formData: FormData) {
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
+  const validation = z.object({
+    email: z.string().email(),
+    password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.'),
+  }).safeParse({
+    email: formData.get('email'),
+    password: formData.get('password'),
+  });
 
-  if (!email || !password) {
-    return { error: 'El email y la contraseña son obligatorios' };
+  if (!validation.success) {
+    return { error: validation.error.issues[0]?.message ?? 'Revisá los datos ingresados.' };
   }
 
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
+    email: validation.data.email,
+    password: validation.data.password,
   });
 
   if (error) {
@@ -44,12 +55,13 @@ export async function signUpWithEmail(formData: FormData) {
   }
 
   revalidatePath('/', 'layout');
-  return { success: true, user: data.user };
+  return { success: true, user: data.user, confirmationRequired: !data.session };
 }
 
 export async function signOutUser() {
   const supabase = await createServerSupabaseClient();
-  await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut();
+  if (error) return { error: error.message };
   revalidatePath('/', 'layout');
   return { success: true };
 }
