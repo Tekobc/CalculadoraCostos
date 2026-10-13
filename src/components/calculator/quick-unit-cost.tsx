@@ -40,6 +40,7 @@ export function QuickUnitCostCalculator({
   const activeModules = profile?.modulos_activos;
   const useSupplies = !activeModules || activeModules.includes('insumos');
   const useLabor = !activeModules || activeModules.includes('mano_de_obra') || activeModules.includes('servicios');
+  const [nombreProducto, setNombreProducto] = useState('');
   const [unidadesLote, setUnidadesLote] = useState<string>(isDemo ? '12' : '1');
   const [manoDeObraHoras, setManoDeObraHoras] = useState<string>(isDemo ? '2' : '0');
   const [costoHoraMo, setCostoHoraMo] = useState<string>(isDemo ? '3000' : '0');
@@ -148,6 +149,22 @@ export function QuickUnitCostCalculator({
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {onSaveAsProduct && (
+          <div className="max-w-xl">
+            <Label htmlFor="quick-product-name" required>Nombre de la receta</Label>
+            <Input
+              id="quick-product-name"
+              value={nombreProducto}
+              onChange={(event) => setNombreProducto(event.target.value)}
+              placeholder="Ej.: Alfajores de maicena"
+              aria-describedby="quick-product-name-hint"
+            />
+            <p id="quick-product-name-hint" className="mt-1 text-xs text-ink/60">
+              Este nombre se usará al guardarla en tu catálogo de productos.
+            </p>
+          </div>
+        )}
+
         {/* Parámetros de lote */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-canvas/60 p-4 rounded-xl border border-ink/5">
           <div>
@@ -304,10 +321,11 @@ export function QuickUnitCostCalculator({
               <Button
                 size="sm"
                 variant="outline"
+                disabled={!nombreProducto.trim()}
                 onClick={() => {
                   const newProd: Product = {
                     id: crypto.randomUUID(),
-                    nombre: 'Receta Calculada',
+                    nombre: nombreProducto.trim(),
                     tipo: profile?.tipo === 'servicio' ? 'servicio' : 'producto',
                     unidades_lote_base: unidades,
                     insumos: supplies.map((s) => ({

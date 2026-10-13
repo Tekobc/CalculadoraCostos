@@ -12,6 +12,11 @@ import { BusinessProfile, ModuleType } from '@/domain/schemas/profile.schema';
 import { SupplyItem } from '@/domain/schemas/costs.schema';
 import { formatCurrencyARS, formatRelativeDate } from '@/lib/formatters/currency';
 import { calculateSupplyItemCost } from '@/domain/calculator/supplies';
+import {
+  BAKING_UNITS,
+  getCompatibleUsageUnits,
+  getUnitConversionFactor,
+} from '@/domain/calculator/units';
 import { calculatePriceIncludingCommission } from '@/domain/calculator/pricing';
 import { InflationAlertBadge } from './inflation-alert-badge';
 
@@ -27,35 +32,35 @@ export function ProductCatalogManager({
   onProductsChange,
 }: ProductCatalogManagerProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>(products[0]?.id || '1');
-  const [editingSupplyId, setEditingSupplyId] = useState<string | null>(null);
-  const [newPriceValue, setNewPriceValue] = useState<string>('');
+  const [newProductName, setNewProductName] = useState('');
+  const [productNameError, setProductNameError] = useState<string | null>(null);
 
   const activeProduct = products.find((p) => p.id === selectedProductId) || products[0];
   const activeModules: ModuleType[] = profile?.modulos_activos ?? ['insumos', 'mano_de_obra'];
   const moduleEnabled = (module: ModuleType) => activeModules.includes(module);
 
-  const handleUpdateSupplyPrice = (supplyId: string, newPrice: number) => {
+  const updateSupply = (supplyId: string, patch: Partial<SupplyItem>) => {
     if (!activeProduct) return;
 
-    const updatedInsumos = activeProduct.insumos.map((i) => {
-      if (i.id === supplyId) {
-        return {
-          ...i,
-          precio_compra: newPrice,
-          fecha_actualizacion: new Date().toISOString(),
-        };
-      }
-      return i;
-    });
-
-    const updatedProduct = {
+    const updatedProduct: Product = {
       ...activeProduct,
-      insumos: updatedInsumos,
+      insumos: activeProduct.insumos.map((item) =>
+        item.id === supplyId
+          ? {
+              ...item,
+              ...patch,
+              ...(patch.precio_compra !== undefined && patch.precio_compra > 0
+                ? { status: 'confirmado' as const }
+                : {}),
+              fecha_actualizacion: patch.precio_compra !== undefined
+                ? new Date().toISOString()
+                : item.fecha_actualizacion,
+            }
+          : item
+      ),
       fecha_actualizacion: new Date().toISOString(),
     };
-
     onProductsChange(products.map((p) => (p.id === activeProduct.id ? updatedProduct : p)));
-    setEditingSupplyId(null);
   };
 
   const updateActiveProduct = (patch: Partial<Product>) => {
@@ -70,11 +75,18 @@ export function ProductCatalogManager({
     ));
   };
 
-  const handleAddProduct = () => {
+  const handleAddProduct = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nombre = newProductName.trim();
+    if (!nombre) {
+      setProductNameError('Escribí el nombre del producto para agregarlo.');
+      return;
+    }
+
     const newId = crypto.randomUUID();
     const newProduct: Product = {
       id: newId,
-      nombre: profile?.tipo === 'servicio' ? 'Nuevo servicio' : 'Nuevo Producto / Receta',
+      nombre,
       tipo: profile?.tipo === 'servicio' ? 'servicio' : 'producto',
       unidades_lote_base: 1,
       insumos: [],
@@ -93,9 +105,11 @@ export function ProductCatalogManager({
 
     onProductsChange([...products, newProduct]);
     setSelectedProductId(newId);
+    setNewProductName('');
+    setProductNameError(null);
   };
 
-  const calcularCostoUnitario = (prod: Product) => {
+  const calcularDesgloseCostos = (prod: Product) => {
     let sumInsumos = new Decimal(0);
     if (moduleEnabled('insumos')) {
       for (const item of prod.insumos) {
@@ -140,26 +154,60 @@ export function ProductCatalogManager({
     const sumMo = includesLabor
       ? new Decimal(prod.tiempo_produccion_horas).times(prod.costo_hora_mano_obra)
       : new Decimal(0);
-    const costoLote = sumInsumos.plus(sumPackaging).plus(sumEnergia).plus(sumGas).plus(sumMo);
+    const unidades = new Decimal(prod.unidades_lote_base || 1);
     const costoFijoUnitario = moduleEnabled('costos_fijos')
       ? new Decimal(prod.costos_fijos_unitarios)
       : new Decimal(0);
-    return costoLote.dividedBy(prod.unidades_lote_base || 1).plus(costoFijoUnitario);
+    const costoPorUnidad = (lote: Decimal) => lote.dividedBy(unidades);
+    const ingredientesUnitarios = costoPorUnidad(sumInsumos);
+    const energiaUnitaria = costoPorUnidad(sumEnergia);
+    const gasUnitario = costoPorUnidad(sumGas);
+    const manoDeObraUnitaria = costoPorUnidad(sumMo);
+
+    return {
+      ingredientes: ingredientesUnitarios,
+      packaging: sumPackaging,
+      energia: energiaUnitaria,
+      gas: gasUnitario,
+      manoDeObra: manoDeObraUnitaria,
+      costosFijos: costoFijoUnitario,
+      total: ingredientesUnitarios
+        .plus(sumPackaging)
+        .plus(energiaUnitaria)
+        .plus(gasUnitario)
+        .plus(manoDeObraUnitaria)
+        .plus(costoFijoUnitario),
+    };
   };
 
   const modulesNotIncludedInPrice = activeModules.filter((module) =>
-    (module === 'insumos' && activeProduct?.insumos.length === 0) ||
-    (module === 'packaging' && activeProduct?.packaging.length === 0) ||
-    (module === 'energia' && activeProduct?.consumo_energia.length === 0) ||
-    (module === 'gas' && activeProduct?.consumo_gas.length === 0) ||
+    (module === 'insumos' && (
+      activeProduct?.insumos.length === 0 ||
+      activeProduct?.insumos.some((item) => item.precio_compra <= 0 || item.status === 'estimado')
+    )) ||
+    (module === 'packaging' && (
+      activeProduct?.packaging.length === 0 ||
+      activeProduct?.packaging.some((item) => item.costo_unitario <= 0 || item.status === 'estimado')
+    )) ||
+    (module === 'energia' && (
+      activeProduct?.consumo_energia.length === 0 ||
+      activeProduct?.consumo_energia.some((item) =>
+        item.potencia_w <= 0 || item.horas_uso <= 0 || item.tarifa_kwh <= 0
+      )
+    )) ||
+    (module === 'gas' && (
+      activeProduct?.consumo_gas.length === 0 ||
+      activeProduct?.consumo_gas.some((item) =>
+        item.consumo_m3_h <= 0 || item.horas_uso <= 0 || item.tarifa_m3 <= 0
+      )
+    )) ||
     ((module === 'mano_de_obra' || module === 'servicios') &&
       (!activeProduct?.tiempo_produccion_horas || !activeProduct?.costo_hora_mano_obra))
   );
 
   return (
     <div className="space-y-6">
-      {/* Selector y listado de productos */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           {products.map((prod) => {
             const hasOutdatedSupplies = moduleEnabled('insumos') && prod.insumos.some((i) => {
@@ -176,13 +224,15 @@ export function ProductCatalogManager({
                 key={prod.id}
                 type="button"
                 onClick={() => setSelectedProductId(prod.id!)}
+                aria-pressed={prod.id === activeProduct?.id}
+                title={prod.nombre}
                 className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl border transition-all flex items-center gap-2 ${
                   prod.id === activeProduct?.id
                     ? 'bg-primary text-white border-primary shadow-sm'
                     : 'bg-white text-ink/80 border-ink/15 hover:bg-canvas'
                 }`}
               >
-                <span>{prod.nombre}</span>
+                <span className="max-w-[14rem] truncate">{prod.nombre}</span>
                 {hasOutdatedSupplies && (
                   <span className="w-2 h-2 rounded-full bg-danger animate-pulse" title="Insumos desactualizados" />
                 )}
@@ -191,13 +241,43 @@ export function ProductCatalogManager({
           })}
         </div>
 
-        <Button size="sm" variant="outline" onClick={handleAddProduct}>
-          + Nueva Receta / Producto
-        </Button>
+        <form
+          onSubmit={handleAddProduct}
+          className="grid gap-3 rounded-2xl border border-primary/15 bg-white/80 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+        >
+          <div>
+            <Label htmlFor="new-product-name" required>
+              Nombre del producto
+            </Label>
+            <Input
+              id="new-product-name"
+              value={newProductName}
+              onChange={(event) => {
+                setNewProductName(event.target.value);
+                if (event.target.value.trim()) setProductNameError(null);
+              }}
+              placeholder="Ej.: Torta de chocolate 20 cm"
+              aria-describedby={productNameError ? 'new-product-error' : 'new-product-hint'}
+              error={Boolean(productNameError)}
+            />
+            {productNameError ? (
+              <p id="new-product-error" role="alert" className="mt-1 text-xs text-danger">
+                {productNameError}
+              </p>
+            ) : (
+              <p id="new-product-hint" className="mt-1 text-xs text-ink/60">
+                Agregalo y completá su receta, rendimiento y costos.
+              </p>
+            )}
+          </div>
+          <Button type="submit" variant="primary">
+            + Agregar producto
+          </Button>
+        </form>
       </div>
 
       {activeProduct && (
-        <Card className="border-ink/15">
+        <Card key={activeProduct.id} className="border-ink/15">
           <CardHeader>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
@@ -207,11 +287,24 @@ export function ProductCatalogManager({
                   onBlur={(event) => {
                     const nombre = event.currentTarget.value.trim();
                     if (nombre && nombre !== activeProduct.nombre) updateActiveProduct({ nombre });
+                    if (!nombre) event.currentTarget.value = activeProduct.nombre;
                   }}
                   className="mb-1 border-transparent px-0 text-lg font-bold shadow-none focus-visible:border-ink/20"
                 />
+                <Input
+                  aria-label="Presentación o tamaño del producto"
+                  placeholder="Presentación: por ejemplo, torta de 20 cm"
+                  defaultValue={activeProduct.descripcion ?? ''}
+                  onBlur={(event) => {
+                    const descripcion = event.currentTarget.value.trim();
+                    if (descripcion !== (activeProduct.descripcion ?? '')) {
+                      updateActiveProduct({ descripcion });
+                    }
+                  }}
+                  className="mb-2 max-w-md text-xs"
+                />
                 <CardDescription>
-                  Lote base: {activeProduct.unidades_lote_base} unidades
+                  Rendimiento actual: {activeProduct.unidades_lote_base} unidad(es) por tanda
                   {moduleEnabled('mano_de_obra') || moduleEnabled('servicios')
                     ? ` · Mano de obra: ${activeProduct.tiempo_produccion_horas}h a ${formatCurrencyARS(activeProduct.costo_hora_mano_obra)}/h`
                     : ''}
@@ -240,8 +333,10 @@ export function ProductCatalogManager({
               {moduleEnabled('insumos') && <div className="space-y-3">
                 <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="font-semibold text-ink text-sm sm:text-base">Insumos y Fecha de Última Actualización</h4>
-                  <p className="text-xs font-normal text-ink/65">Control contextual anti-inflación (Argentina)</p>
+                  <h4 className="font-semibold text-ink text-sm sm:text-base">Ingredientes de la receta</h4>
+                  <p className="text-xs font-normal text-ink/65">
+                    Cargá el precio del envase y cuánto usás en esta tanda.
+                  </p>
                 </div>
                 <Button
                   size="sm"
@@ -249,12 +344,12 @@ export function ProductCatalogManager({
                   onClick={() => {
                     const nuevoInsumo: SupplyItem = {
                       id: crypto.randomUUID(),
-                      nombre: 'Nuevo Insumo',
+                      nombre: 'Nuevo ingrediente',
                       cantidad_compra: 1,
                       unidad_compra: 'kg',
                       precio_compra: 0,
-                      cantidad_usada: 100,
-                      unidad_uso: 'gr',
+                      cantidad_usada: 1,
+                      unidad_uso: 'g',
                       factor_conversion: 1000,
                       merma_porcentaje: 0,
                       fecha_actualizacion: new Date().toISOString(),
@@ -273,7 +368,13 @@ export function ProductCatalogManager({
                 </Button>
               </div>
 
-              <div className="space-y-2.5">
+              {activeProduct.insumos.length === 0 && (
+                <p className="rounded-xl bg-canvas/70 px-4 py-3 text-sm text-ink/70">
+                  Todavía no hay ingredientes. Agregá el primero para empezar a calcular el costo de esta receta.
+                </p>
+              )}
+
+              <div className="space-y-3">
                 {activeProduct.insumos.map((item) => {
                   const itemCost = calculateSupplyItemCost(
                     item.precio_compra,
@@ -285,85 +386,176 @@ export function ProductCatalogManager({
 
                   return (
                     <div
-                      key={item.id}
-                      className="p-3.5 bg-white rounded-xl border border-ink/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs sm:text-sm"
+                      key={item.id ?? item.nombre}
+                      className="rounded-xl border border-ink/10 bg-white p-4 space-y-3"
                     >
-                      <div className="space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-ink">{item.nombre}</span>
-                          <span className="text-xs text-ink/60">
-                            ({item.cantidad_usada} {item.unidad_uso} de {item.cantidad_compra} {item.unidad_compra})
-                          </span>
+                          <h5 className="font-semibold text-ink">{item.nombre}</h5>
+                          {item.status === 'estimado' && <Badge variant="accent">Estimado</Badge>}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3">
                           <InflationAlertBadge
                             fechaActualizacionIso={item.fecha_actualizacion}
                             nombreInsumo={item.nombre}
                             onUpdateRequested={() => {
-                              setEditingSupplyId(item.id!);
-                              setNewPriceValue(item.precio_compra.toString());
+                              const input = document.getElementById(`supply-price-${item.id}`);
+                              input?.focus();
                             }}
                           />
+                          <button
+                            type="button"
+                            onClick={() => updateActiveProduct({
+                              insumos: activeProduct.insumos.filter((entry) => entry.id !== item.id),
+                            })}
+                            className="min-h-[44px] px-2 text-xs font-medium text-danger underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                            aria-label={`Eliminar ingrediente ${item.nombre}`}
+                          >
+                            Eliminar
+                          </button>
                         </div>
                       </div>
 
-                      {editingSupplyId === item.id ? (
-                        <div className="flex items-center gap-2">
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div>
+                          <Label htmlFor={`supply-name-${item.id}`}>Ingrediente</Label>
                           <Input
-                            type="number"
-                            value={newPriceValue}
-                            onChange={(e) => setNewPriceValue(e.target.value)}
-                            className="w-28 h-8 text-xs bg-canvas"
-                            placeholder="Nuevo precio"
-                            autoFocus
-                          />
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            onClick={() => handleUpdateSupplyPrice(item.id!, parseFloat(newPriceValue) || item.precio_compra)}
-                            className="h-8 text-xs px-2.5"
-                          >
-                            Guardar
-                          </Button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingSupplyId(null)}
-                            className="text-xs text-ink/60 hover:text-ink px-1"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-4 text-right">
-                          <div>
-                            <span className="text-xs text-ink/60 block">Precio compra</span>
-                            <span className="font-semibold tabular-nums">
-                              {formatCurrencyARS(item.precio_compra)}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-xs text-ink/60 block">Costo en receta</span>
-                            <span className="font-bold text-primary tabular-nums">
-                              {formatCurrencyARS(itemCost.toNumber())}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingSupplyId(item.id!);
-                              setNewPriceValue(item.precio_compra.toString());
+                            id={`supply-name-${item.id}`}
+                            defaultValue={item.nombre}
+                            onBlur={(event) => {
+                              const nombre = event.currentTarget.value.trim();
+                              if (nombre && nombre !== item.nombre) updateSupply(item.id!, { nombre });
+                              if (!nombre) event.currentTarget.value = item.nombre;
                             }}
-                            className="text-xs text-ink/60 hover:text-primary underline ml-1"
-                          >
-                            Editar
-                          </button>
+                          />
                         </div>
-                      )}
+                        <div>
+                          <Label htmlFor={`supply-price-${item.id}`}>Precio del envase ($)</Label>
+                          <Input
+                            id={`supply-price-${item.id}`}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            defaultValue={item.precio_compra}
+                            onBlur={(event) => updateSupply(item.id!, {
+                              precio_compra: Math.max(0, Number(event.currentTarget.value) || 0),
+                            })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor={`supply-purchase-amount-${item.id}`}>Cantidad del envase</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id={`supply-purchase-amount-${item.id}`}
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              defaultValue={item.cantidad_compra}
+                              onBlur={(event) => updateSupply(item.id!, {
+                                cantidad_compra: Math.max(0.001, Number(event.currentTarget.value) || 0.001),
+                              })}
+                              className="min-w-0"
+                            />
+                            <select
+                              aria-label={`Unidad del envase de ${item.nombre}`}
+                              value={item.unidad_compra}
+                              onChange={(event) => {
+                                const unidad_compra = event.target.value;
+                                const compatibleUnits = getCompatibleUsageUnits(unidad_compra);
+                                const unidad_uso = compatibleUnits.includes(item.unidad_uso)
+                                  ? item.unidad_uso
+                                  : compatibleUnits[0];
+                                updateSupply(item.id!, {
+                                  unidad_compra,
+                                  unidad_uso,
+                                  factor_conversion: getUnitConversionFactor(unidad_compra, unidad_uso) ?? 1,
+                                });
+                              }}
+                              className="min-h-[44px] rounded-xl border border-ink/15 bg-white px-2 text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                            >
+                              {!BAKING_UNITS.includes(item.unidad_compra as typeof BAKING_UNITS[number]) && (
+                                <option value={item.unidad_compra}>{item.unidad_compra}</option>
+                              )}
+                              {BAKING_UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <Label htmlFor={`supply-used-amount-${item.id}`}>Cantidad usada en la tanda</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id={`supply-used-amount-${item.id}`}
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              defaultValue={item.cantidad_usada}
+                              onBlur={(event) => updateSupply(item.id!, {
+                                cantidad_usada: Math.max(0.001, Number(event.currentTarget.value) || 0.001),
+                              })}
+                              className="min-w-0"
+                            />
+                            <select
+                              aria-label={`Unidad usada de ${item.nombre}`}
+                              value={item.unidad_uso}
+                              onChange={(event) => {
+                                const unidad_uso = event.target.value;
+                                updateSupply(item.id!, {
+                                  unidad_uso,
+                                  factor_conversion: getUnitConversionFactor(item.unidad_compra, unidad_uso) ?? 1,
+                                });
+                              }}
+                              className="min-h-[44px] rounded-xl border border-ink/15 bg-white px-2 text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                            >
+                              {!getCompatibleUsageUnits(item.unidad_compra).includes(item.unidad_uso) && (
+                                <option value={item.unidad_uso}>{item.unidad_uso}</option>
+                              )}
+                              {getCompatibleUsageUnits(item.unidad_compra).map((unit) => (
+                                <option key={unit} value={unit}>{unit}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <Label htmlFor={`supply-waste-${item.id}`}>Merma (%)</Label>
+                          <Input
+                            id={`supply-waste-${item.id}`}
+                            type="number"
+                            min="0"
+                            max="99.9"
+                            step="0.1"
+                            defaultValue={item.merma_porcentaje}
+                            onBlur={(event) => updateSupply(item.id!, {
+                              merma_porcentaje: Math.min(99.9, Math.max(0, Number(event.currentTarget.value) || 0)),
+                            })}
+                          />
+                        </div>
+                        <div className="flex items-end justify-between rounded-xl bg-canvas/70 px-3 py-2 sm:col-span-2">
+                          <span className="text-sm text-ink/70">Costo usado en esta receta</span>
+                          <strong className="tabular-nums text-primary">{formatCurrencyARS(itemCost.toNumber())}</strong>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
               </div>
               </div>}
+
+              <div className="max-w-xs">
+                <Label htmlFor={`batch-yield-${activeProduct.id}`}>Unidades que rinde esta tanda</Label>
+                <Input
+                  id={`batch-yield-${activeProduct.id}`}
+                  type="number"
+                  min="0.001"
+                  step="any"
+                  defaultValue={activeProduct.unidades_lote_base}
+                  onBlur={(event) => updateActiveProduct({
+                    unidades_lote_base: Math.max(0.001, Number(event.currentTarget.value) || 0.001),
+                  })}
+                />
+                <p className="mt-1 text-xs text-ink/60">
+                  Ejemplo: si una receta rinde 12 porciones, escribí 12.
+                </p>
+              </div>
 
             {(moduleEnabled('mano_de_obra') || moduleEnabled('servicios') ||
               moduleEnabled('packaging') || moduleEnabled('energia') || moduleEnabled('gas') ||
@@ -587,7 +779,8 @@ export function ProductCatalogManager({
 
             {/* Resumen Unitario y Precio Sugerido */}
             {(() => {
-              const costoUnitario = calcularCostoUnitario(activeProduct);
+              const desglose = calcularDesgloseCostos(activeProduct);
+              const costoUnitario = desglose.total;
               const comision = moduleEnabled('impuestos_comisiones')
                 ? activeProduct.impuestos_comisiones_porcentaje
                 : 0;
@@ -599,34 +792,49 @@ export function ProductCatalogManager({
                   comision,
                   activeProduct.estrategia_precio
                 );
+                const lineasCostos = [
+                  { label: 'Ingredientes', module: 'insumos' as const, amount: desglose.ingredientes },
+                  { label: 'Packaging', module: 'packaging' as const, amount: desglose.packaging },
+                  { label: 'Electricidad', module: 'energia' as const, amount: desglose.energia },
+                  { label: 'Gas', module: 'gas' as const, amount: desglose.gas },
+                  { label: activeProduct.tipo === 'servicio' ? 'Tiempo del servicio' : 'Mano de obra', module: 'mano_de_obra' as const, amount: desglose.manoDeObra },
+                  { label: 'Costos fijos', module: 'costos_fijos' as const, amount: desglose.costosFijos },
+                ].filter((line) =>
+                  line.module === 'mano_de_obra'
+                    ? moduleEnabled('mano_de_obra') || moduleEnabled('servicios')
+                    : moduleEnabled(line.module)
+                );
 
-              return (
-                <div className="bg-canvas rounded-2xl p-5 border border-ink/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="space-y-1 text-center sm:text-left">
-                    <span className="text-xs uppercase tracking-wider text-ink/60 font-semibold block">
-                      Costo Unitario Consolidado
-                    </span>
-                    <span className="text-2xl font-extrabold text-ink tabular-nums">
-                      {formatCurrencyARS(costoUnitario.toNumber())}
-                    </span>
-                    <p className="text-xs text-ink/65">
-                      {activeModules.map((module) => ({
-                        insumos: 'insumos',
-                        mano_de_obra: 'mano de obra',
-                        energia: 'energía',
-                        gas: 'gas',
-                        costos_fijos: 'costos fijos',
-                        impuestos_comisiones: 'impuestos y comisiones',
-                        packaging: 'packaging',
-                        servicios: 'servicios',
-                      }[module])).join(', ')}
-                    </p>
-                  </div>
+                return (
+                  <div className="grid gap-5 rounded-2xl border border-primary/15 bg-canvas p-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.8fr)]">
+                    <div className="space-y-3">
+                      <div>
+                        <span className="text-xs font-semibold uppercase tracking-wider text-ink/65">
+                          Costo de una unidad
+                        </span>
+                        <p className="text-3xl font-extrabold text-ink tabular-nums">
+                          {formatCurrencyARS(costoUnitario.toNumber())}
+                        </p>
+                        <p className="text-xs text-ink/65">
+                          Cada costo de tanda se divide por las {activeProduct.unidades_lote_base} unidades que rinde.
+                        </p>
+                      </div>
+                      <dl className="grid gap-x-4 gap-y-2 border-t border-ink/10 pt-3 sm:grid-cols-2">
+                        {lineasCostos.map((line) => (
+                          <div key={line.label} className="flex justify-between gap-2 text-sm">
+                            <dt className="text-ink/70">{line.label}</dt>
+                            <dd className="font-medium tabular-nums text-ink">
+                              {formatCurrencyARS(line.amount.toNumber())}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
 
-                  <div className="text-center sm:text-right bg-white px-5 py-3 rounded-xl border-2 border-primary/30 shadow-sm">
-                    <label
-                      htmlFor={`target-percent-${activeProduct.id}`}
-                      className="text-xs uppercase tracking-wider text-primary font-bold block"
+                    <div className="rounded-xl border-2 border-primary/30 bg-white p-4 text-center sm:text-right">
+                      <label
+                        htmlFor={`target-percent-${activeProduct.id}`}
+                        className="text-xs uppercase tracking-wider text-primary font-bold block"
                     >
                       Objetivo de {activeProduct.estrategia_precio === 'margen' ? 'margen' : 'markup'} (%)
                     </label>
@@ -653,6 +861,11 @@ export function ProductCatalogManager({
                       <span role="alert" className="text-xs text-danger">
                         Margen y comisión no pueden sumar 100% o más.
                       </span>
+                    )}
+                    {comision > 0 && (
+                      <p className="mt-1 text-xs text-ink/65">
+                        Incluye {comision}% de impuestos/comisiones sobre la venta.
+                      </p>
                     )}
                   </div>
                   {modulesNotIncludedInPrice.length > 0 && (
