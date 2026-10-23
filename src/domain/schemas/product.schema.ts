@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { SupplyItemSchema, PackagingItemSchema, EnergyUsageSchema, GasUsageSchema, PricingModeSchema } from './costs.schema';
+import {
+  SupplyItemSchema,
+  PackagingItemSchema,
+  EnergyUsageSchema,
+  GasUsageSchema,
+  PricingModeSchema,
+  PrintingCostSchema,
+} from './costs.schema';
 
 export const ProductTypeSchema = z.enum(['producto', 'servicio']);
 export type ProductType = z.infer<typeof ProductTypeSchema>;
@@ -19,6 +26,7 @@ export const ProductSchema = z.object({
   packaging: z.array(PackagingItemSchema).default([]),
   consumo_energia: z.array(EnergyUsageSchema).default([]),
   consumo_gas: z.array(GasUsageSchema).default([]),
+  impresion: PrintingCostSchema.nullable().optional(),
   
   // Mano de obra
   tiempo_produccion_horas: z.number().nonnegative().default(0),

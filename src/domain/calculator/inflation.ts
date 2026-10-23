@@ -108,6 +108,14 @@ export function simulateProductCostIncrease(
   return {
     ...producto,
     insumos: nuevosInsumos,
+    impresion: producto.impresion
+      ? {
+          ...producto.impresion,
+          costo_por_hoja: new Decimal(producto.impresion.costo_por_hoja)
+            .times(factorInsumos)
+            .toNumber(),
+        }
+      : producto.impresion,
     consumo_energia: nuevoConsumoEnergia,
     consumo_gas: nuevoConsumoGas,
     fecha_actualizacion: new Date().toISOString(),

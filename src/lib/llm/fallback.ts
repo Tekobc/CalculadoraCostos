@@ -13,6 +13,9 @@ export function generateDeterministicProfile(data: LLMExtractionRequest): LLMPro
   const equipos: LLMProfileExtraction['equipos_detectados'] = [];
   const insumos: LLMProfileExtraction['insumos_sugeridos'] = [];
   const preguntas: LLMProfileExtraction['preguntas_seguimiento'] = [];
+  const businessDescription = `${rubroInput} ${text}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 
   // Determinación de tipo (producto vs servicio)
   let tipo: 'producto' | 'servicio' | 'mixto' = data.tipo_base || 'producto';
@@ -36,6 +39,21 @@ export function generateDeterministicProfile(data: LLMExtractionRequest): LLMPro
     modulos.add('packaging');
   } else {
     modulos.add('servicios');
+  }
+
+  const isPrintingBusiness = [
+    'imprenta',
+    'impresion',
+    'impresora',
+    'sticker',
+    'calcomania',
+    'calendario',
+    'almanaque',
+    'grafica',
+    'vinilo',
+  ].some((keyword) => businessDescription.includes(keyword));
+  if (isPrintingBusiness) {
+    modulos.add('impresion');
   }
 
   // Detección de equipos y energía
@@ -117,7 +135,7 @@ export function generateDeterministicProfile(data: LLMExtractionRequest): LLMPro
       { nombre: 'Esencia aromática', unidad_medida: 'ml', posible_merma_pct: 2, explicacion: 'Aceite aromatizante concentrado' },
       { nombre: 'Pabilos y ojalillos', unidad_medida: 'unidad', posible_merma_pct: 0, explicacion: 'Mechas para encendido' }
     );
-  } else {
+  } else if (!isPrintingBusiness) {
     insumos.push(
       { nombre: 'Insumo principal', unidad_medida: 'unidad', posible_merma_pct: 0, explicacion: 'Materia prima esencial del producto' }
     );

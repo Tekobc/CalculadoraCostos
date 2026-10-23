@@ -3,6 +3,7 @@ import { Product } from '@/domain/schemas/product.schema';
 import { InventoryItem, ProductionEntry } from '@/domain/schemas/operations.schema';
 import { calculatePriceIncludingCommission } from './pricing';
 import { calculateSupplyItemCost } from './supplies';
+import { calculatePrintingCost } from './printing';
 
 export interface SupplyRequirement {
   nombre: string;
@@ -104,8 +105,10 @@ export function estimateProduct(
   batchCost = batchCost.plus(
     new Decimal(product.tiempo_produccion_horas).times(product.costo_hora_mano_obra)
   );
+  const printingCost = calculatePrintingCost(product.impresion, units);
 
   const unitCost = batchCost.dividedBy(batchUnits)
+    .plus(printingCost.dividedBy(units))
     .plus(packagingUnitCost)
     .plus(product.costos_fijos_unitarios);
   const unitPrice = getEstimatedUnitPrice(product, unitCost);

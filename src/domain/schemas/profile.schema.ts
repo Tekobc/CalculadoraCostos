@@ -9,6 +9,7 @@ export const ModuleTypeSchema = z.enum([
   'impuestos_comisiones',
   'packaging',
   'servicios',
+  'impresion',
 ]);
 
 export type ModuleType = z.infer<typeof ModuleTypeSchema>;

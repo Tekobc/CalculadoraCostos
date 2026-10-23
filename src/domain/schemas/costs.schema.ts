@@ -44,6 +44,14 @@ export const PackagingItemSchema = z.object({
 
 export type PackagingItem = z.infer<typeof PackagingItemSchema>;
 
+export const PrintingCostSchema = z.object({
+  nombre_hoja: z.string().trim().min(1, 'Indicá el material o formato de la hoja'),
+  costo_por_hoja: z.number().nonnegative('El costo por hoja no puede ser negativo'),
+  unidades_por_hoja: z.number().int().positive('La cantidad de piezas por hoja debe ser un entero mayor a cero'),
+});
+
+export type PrintingCost = z.infer<typeof PrintingCostSchema>;
+
 export const BatchCalculationInputSchema = z.object({
   unidades_producidas: z.number().positive('Las unidades producidas deben ser mayor a 0'),
   insumos: z.array(SupplyItemSchema).default([]),

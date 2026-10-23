@@ -87,6 +87,11 @@ describe('Inflation & Price Staleness Calculator', () => {
         },
       ],
       consumo_gas: [],
+      impresion: {
+        nombre_hoja: 'A4 autoadhesiva',
+        costo_por_hoja: 1200,
+        unidades_por_hoja: 24,
+      },
       tiempo_produccion_horas: 1,
       costo_hora_mano_obra: 2000,
       costos_fijos_unitarios: 0,
@@ -100,5 +105,6 @@ describe('Inflation & Price Staleness Calculator', () => {
 
     expect(sim.insumos[0].precio_compra).toBe(6000);
     expect(sim.consumo_energia[0].tarifa_kwh).toBe(110);
+    expect(sim.impresion?.costo_por_hoja).toBe(1440);
   });
 });

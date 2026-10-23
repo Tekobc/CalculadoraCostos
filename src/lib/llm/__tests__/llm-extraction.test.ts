@@ -54,4 +54,17 @@ describe('LLM Extraction Fallback & Schema Validation', () => {
     expect(result.modulos_recomendados).toContain('energia');
     expect(result.modulos_recomendados).not.toContain('gas');
   });
+
+  it('recommends sheet printing costs for a sticker and calendar business', () => {
+    const result = generateDeterministicProfile({
+      descripcion_usuario: 'Imprimo stickers y almanaques en hojas A4 autoadhesivas.',
+      rubro_base: 'Imprenta gráfica',
+      provincia: 'Buenos Aires',
+      lugar_trabajo: 'local_alquilado',
+      tiene_empleados: true,
+    });
+
+    expect(result.modulos_recomendados).toContain('impresion');
+    expect(LLMProfileExtractionSchema.safeParse(result).success).toBe(true);
+  });
 });

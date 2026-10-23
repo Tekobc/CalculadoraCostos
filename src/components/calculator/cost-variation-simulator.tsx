@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Product } from '@/domain/schemas/product.schema';
 import { formatCurrencyARS } from '@/lib/formatters/currency';
 import { calculateSupplyItemCost } from '@/domain/calculator/supplies';
+import { calculatePrintingCost } from '@/domain/calculator/printing';
 import { calculatePriceFromMargin, calculatePriceFromMarkup } from '@/domain/calculator/pricing';
 import { simulateProductCostIncrease } from '@/domain/calculator/inflation';
 
@@ -58,7 +59,8 @@ export function CostVariationSimulator({
       );
     }
     const sumMo = new Decimal(prod.tiempo_produccion_horas).times(prod.costo_hora_mano_obra);
-    return sumInsumos.plus(sumMo);
+    const sumPrinting = calculatePrintingCost(prod.impresion, prod.unidades_lote_base);
+    return sumInsumos.plus(sumMo).plus(sumPrinting);
   };
 
   const costoOriginalTotal = calcularCostoTotal(prodActual);

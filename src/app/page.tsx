@@ -295,9 +295,9 @@ export default function HomePage() {
       : 'Calcular costo de producto';
   const navigationItems = [
     { id: 'products' as const, label: catalogLabel, icon: isServiceBusiness ? '🧰' : isMixedBusiness ? '🧩' : '🍰', visible: true },
-    { id: 'simulator' as const, label: 'Variación de costos', icon: '⚡', visible: products.length > 0 && (moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios')) },
-    { id: 'pricing' as const, label: 'Simular precios', icon: '📈', visible: moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios') },
-    { id: 'calculator' as const, label: quickCalculatorLabel, icon: '🧮', visible: moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios') },
+    { id: 'simulator' as const, label: 'Variación de costos', icon: '⚡', visible: products.length > 0 && (moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios') || moduleEnabled('impresion')) },
+    { id: 'pricing' as const, label: 'Simular precios', icon: '📈', visible: moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios') || moduleEnabled('impresion') },
+    { id: 'calculator' as const, label: quickCalculatorLabel, icon: '🧮', visible: moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios') || moduleEnabled('impresion') },
     { id: 'inventory' as const, label: 'Stock de insumos', icon: '📦', visible: !profile || moduleEnabled('insumos') },
     { id: 'production' as const, label: 'Plan de producción', icon: '🏭', visible: !profile || profile.tipo !== 'servicio' },
     { id: 'orders' as const, label: isServiceBusiness ? 'Trabajos y turnos' : 'Pedidos', icon: '🧾', visible: true },

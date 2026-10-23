@@ -24,6 +24,7 @@ const MODULOS_DISPONIBLES: { id: ModuleType; label: string; desc: string }[] = [
   { id: 'packaging', label: 'Packaging y Envíos', desc: 'Cajas, bolsas, etiquetas y costo logístico' },
   { id: 'impuestos_comisiones', label: 'Impuestos y Comisiones', desc: 'Monotributo, Mercado Pago, comisiones de venta' },
   { id: 'servicios', label: 'Servicios Profesionales', desc: 'Costo por hora, traslados y visitas técnicas' },
+  { id: 'impresion', label: 'Impresión por hoja', desc: 'Costo de impresión y rendimiento de stickers, calendarios y piezas gráficas' },
 ];
 
 export function OnboardingInteractive({ initialProfile, onProfileCreated }: OnboardingInteractiveProps) {

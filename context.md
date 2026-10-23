@@ -101,6 +101,9 @@ Cada emprendimiento activa **solo los módulos que le aplican**. Esto resuelve, 
 | Impuestos y comisiones | Todos | Monotributo, comisiones de cobro, plataformas |
 | Packaging y logística | Productos | Envases, envío, delivery |
 | Servicios | Servicios | Costo por hora, traslados, materiales |
+| Impresión | Gráficas e imprentas | Costo integral por hoja impresa dividido por las piezas vendibles que rinde |
+
+Para productos gráficos (stickers, calcomanías, calendarios, almanaques y similares), se carga el costo total de imprimir cada formato de hoja y cuántas piezas vendibles entran. El costo de impresión por unidad se calcula sobre ese rendimiento; al estimar un trabajo, se redondea hacia arriba la cantidad de hojas necesarias. Si el costo por hoja ya incluye papel/vinilo, tinta, energía y uso de máquina, esos mismos conceptos no deben volver a sumarse como insumos. El módulo es opcional para los demás rubros.
 
 ### Stock, producción y pedidos
 - El stock es compartido entre recetas por nombre de insumo (sin distinguir mayúsculas) y unidad de compra. El nombre y la unidad cargados en stock deben coincidir con los de la receta.

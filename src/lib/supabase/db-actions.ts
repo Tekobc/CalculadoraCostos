@@ -135,6 +135,7 @@ export async function saveProduct(product: Product) {
       packaging: validation.data.packaging,
       consumo_energia: validation.data.consumo_energia,
       consumo_gas: validation.data.consumo_gas,
+      impresion: validation.data.impresion ?? null,
       tiempo_produccion_horas: validation.data.tiempo_produccion_horas,
       costo_hora_mano_obra: validation.data.costo_hora_mano_obra,
       costos_fijos_unitarios: validation.data.costos_fijos_unitarios,

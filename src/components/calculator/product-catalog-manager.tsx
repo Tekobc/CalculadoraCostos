@@ -13,6 +13,10 @@ import { SupplyItem } from '@/domain/schemas/costs.schema';
 import { formatCurrencyARS, formatRelativeDate } from '@/lib/formatters/currency';
 import { calculateSupplyItemCost } from '@/domain/calculator/supplies';
 import {
+  calculatePrintedSheets,
+  calculatePrintingUnitCost,
+} from '@/domain/calculator/printing';
+import {
   BAKING_UNITS,
   getCompatibleUsageUnits,
   getUnitConversionFactor,
@@ -39,7 +43,7 @@ export function ProductCatalogManager({
   );
 
   const activeProduct = products.find((p) => p.id === selectedProductId) || products[0];
-  const activeModules: ModuleType[] = profile?.modulos_activos ?? ['insumos', 'mano_de_obra'];
+  const activeModules: ModuleType[] = profile?.modulos_activos ?? ['insumos', 'mano_de_obra', 'impresion'];
   const moduleEnabled = (module: ModuleType) => activeModules.includes(module);
   const isMixedBusiness = profile?.tipo === 'mixto';
   const isServiceCatalog = profile?.tipo === 'servicio';
@@ -161,6 +165,9 @@ export function ProductCatalogManager({
       ? new Decimal(prod.tiempo_produccion_horas).times(prod.costo_hora_mano_obra)
       : new Decimal(0);
     const unidades = new Decimal(prod.unidades_lote_base || 1);
+    const impresionUnitario = moduleEnabled('impresion')
+      ? calculatePrintingUnitCost(prod.impresion)
+      : new Decimal(0);
     const costoFijoUnitario = moduleEnabled('costos_fijos')
       ? new Decimal(prod.costos_fijos_unitarios)
       : new Decimal(0);
@@ -172,12 +179,14 @@ export function ProductCatalogManager({
 
     return {
       ingredientes: ingredientesUnitarios,
+      impresion: impresionUnitario,
       packaging: sumPackaging,
       energia: energiaUnitaria,
       gas: gasUnitario,
       manoDeObra: manoDeObraUnitaria,
       costosFijos: costoFijoUnitario,
       total: ingredientesUnitarios
+        .plus(impresionUnitario)
         .plus(sumPackaging)
         .plus(energiaUnitaria)
         .plus(gasUnitario)
@@ -190,6 +199,9 @@ export function ProductCatalogManager({
     (module === 'insumos' && (
       activeProduct?.insumos.length === 0 ||
       activeProduct?.insumos.some((item) => item.precio_compra <= 0 || item.status === 'estimado')
+    )) ||
+    (module === 'impresion' && (
+      !activeProduct?.impresion || activeProduct.impresion.costo_por_hoja <= 0
     )) ||
     (module === 'packaging' && (
       activeProduct?.packaging.length === 0 ||
@@ -469,8 +481,8 @@ export function ProductCatalogManager({
                             <Input
                               id={`supply-purchase-amount-${item.id}`}
                               type="number"
-                              min="0.001"
-                              step="any"
+                              min="1"
+                              step="1"
                               defaultValue={item.cantidad_compra}
                               onBlur={(event) => updateSupply(item.id!, {
                                 cantidad_compra: Math.max(0.001, Number(event.currentTarget.value) || 0.001),
@@ -560,6 +572,111 @@ export function ProductCatalogManager({
                 })}
               </div>
               </div>}
+
+              {moduleEnabled('impresion') && (
+                <section className="space-y-3 rounded-xl border border-ink/10 bg-white/80 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-ink">Impresión por hoja</h4>
+                      <p className="mt-1 max-w-prose text-xs text-ink/65">
+                        Incluí en el costo por hoja el material, la tinta, la energía y el uso de la máquina.
+                        No vuelvas a cargar esos mismos costos en insumos.
+                      </p>
+                    </div>
+                    {activeProduct.impresion && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => updateActiveProduct({ impresion: null })}
+                      >
+                        Quitar impresión
+                      </Button>
+                    )}
+                  </div>
+                  {activeProduct.impresion ? (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <Label htmlFor={`print-sheet-name-${activeProduct.id}`}>Hoja o material</Label>
+                          <Input
+                            id={`print-sheet-name-${activeProduct.id}`}
+                            defaultValue={activeProduct.impresion.nombre_hoja}
+                            placeholder="A4 autoadhesiva"
+                            onBlur={(event) => updateActiveProduct({
+                              impresion: {
+                                ...activeProduct.impresion!,
+                                nombre_hoja: event.currentTarget.value.trim() || activeProduct.impresion!.nombre_hoja,
+                              },
+                            })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor={`print-sheet-cost-${activeProduct.id}`}>Costo total por hoja ($)</Label>
+                          <Input
+                            id={`print-sheet-cost-${activeProduct.id}`}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            defaultValue={activeProduct.impresion.costo_por_hoja}
+                            onBlur={(event) => updateActiveProduct({
+                              impresion: {
+                                ...activeProduct.impresion!,
+                                costo_por_hoja: Math.max(0, Number(event.currentTarget.value) || 0),
+                              },
+                            })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor={`print-sheet-yield-${activeProduct.id}`}>Piezas vendibles por hoja</Label>
+                          <Input
+                            id={`print-sheet-yield-${activeProduct.id}`}
+                            type="number"
+                            min="1"
+                            step="1"
+                            defaultValue={activeProduct.impresion.unidades_por_hoja}
+                            onBlur={(event) => updateActiveProduct({
+                              impresion: {
+                                ...activeProduct.impresion!,
+                                unidades_por_hoja: Math.max(1, Math.round(Number(event.currentTarget.value) || 1)),
+                              },
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-ink/65">
+                        Cada pieza vendible incorpora{' '}
+                        <strong className="tabular-nums">
+                          {formatCurrencyARS(calculatePrintingUnitCost(activeProduct.impresion).toNumber())}
+                        </strong>{' '}
+                        de impresión. Para esta tanda se estiman{' '}
+                        <strong className="tabular-nums">
+                          {calculatePrintedSheets(
+                            activeProduct.unidades_lote_base,
+                            activeProduct.impresion.unidades_por_hoja
+                          ).toString()}
+                        </strong>{' '}
+                        hoja(s) de {activeProduct.impresion.nombre_hoja}. El sistema redondea hacia arriba para no subestimar el costo.
+                      </p>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => updateActiveProduct({
+                        impresion: {
+                          nombre_hoja: 'Hoja impresa',
+                          costo_por_hoja: 0,
+                          unidades_por_hoja: 1,
+                        },
+                      })}
+                    >
+                      + Agregar costo de impresión
+                    </Button>
+                  )}
+                </section>
+              )}
 
               <div className="max-w-xs">
                 <Label htmlFor={`batch-yield-${activeProduct.id}`}>Unidades que rinde esta tanda</Label>
@@ -815,6 +932,7 @@ export function ProductCatalogManager({
                 );
                 const lineasCostos = [
                   { label: 'Ingredientes', module: 'insumos' as const, amount: desglose.ingredientes },
+                  { label: 'Impresión', module: 'impresion' as const, amount: desglose.impresion },
                   { label: 'Packaging', module: 'packaging' as const, amount: desglose.packaging },
                   { label: 'Electricidad', module: 'energia' as const, amount: desglose.energia },
                   { label: 'Gas', module: 'gas' as const, amount: desglose.gas },

@@ -14,9 +14,11 @@ REGLAS DE NEGOCIO Y COMPORTAMIENTO:
    - "impuestos_comisiones" (comisiones de cobro como Mercado Pago, tarjetas, IIBB)
    - "packaging" (cajas, bolsas, etiquetas, envíos)
    - "servicios" (costo de traslados, visitas técnicas, honorarios por hora)
+   - "impresion" (talleres gráficos e imprentas: costo integral por hoja impresa y rendimiento de piezas)
 4. Detectá equipos mencionados explícitamente; no inventes potencia, consumo ni horas. Si falta un dato numérico, omitilo y preguntá solo si es necesario.
 5. Sugerí insumos probables del rubro y aclaralos como sugerencias, nunca como compras ni costos confirmados.
 6. Formulá como máximo 2 preguntas de seguimiento dinámicas, solo sobre datos relevantes que falten.
+   Para imprentas, gráfica, stickers, calcomanías, almanaques o calendarios, recomendá el módulo "impresion". No inventes el costo de impresión ni el rendimiento; esos datos se cargan por hoja en la app. No sugieras volver a cargar como insumo un papel/vinilo o tinta cuyo costo ya esté incluido en el costo integral por hoja.
 7. Tu respuesta DEBE ser un objeto JSON válido que respete rigurosamente el esquema solicitado. No incluyas texto antes ni después del bloque JSON.
 `;
 
@@ -46,7 +48,7 @@ Genera la respuesta en formato JSON con la siguiente estructura:
 {
   "rubro_detectado": string,
   "tipo": "producto" | "servicio" | "mixto",
-  "modulos_recomendados": ["insumos" | "mano_de_obra" | "energia" | "gas" | "costos_fijos" | "impuestos_comisiones" | "packaging" | "servicios"],
+  "modulos_recomendados": ["insumos" | "mano_de_obra" | "energia" | "gas" | "costos_fijos" | "impuestos_comisiones" | "packaging" | "servicios" | "impresion"],
   "equipos_detectados": [
     {
       "nombre": string,

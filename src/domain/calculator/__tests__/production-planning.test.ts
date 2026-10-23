@@ -31,6 +31,32 @@ const product = ProductSchema.parse({
 });
 
 describe('production planning estimates', () => {
+  it('includes whole-sheet printing cost for the requested quantity', () => {
+    const printProduct = ProductSchema.parse({
+      id: '00000000-0000-4000-8000-000000000006',
+      nombre: 'Plancha de stickers',
+      unidades_lote_base: 10,
+      insumos: [],
+      packaging: [],
+      consumo_energia: [],
+      consumo_gas: [],
+      impresion: {
+        nombre_hoja: 'A4 autoadhesiva',
+        costo_por_hoja: 1200,
+        unidades_por_hoja: 24,
+      },
+      tiempo_produccion_horas: 0,
+      costo_hora_mano_de_obra: 0,
+      costos_fijos_unitarios: 0,
+      estrategia_precio: 'margen',
+      porcentaje_objetivo: 20,
+    });
+
+    const estimate = estimateProduct(printProduct, 49);
+    expect(estimate.costoTotal.toNumber()).toBe(3600);
+    expect(estimate.costoUnitario.toNumber()).toBeCloseTo(3600 / 49);
+  });
+
   it('estimates unit and total costs, revenue and profit using the central stock price', () => {
     const inventory: InventoryItem[] = [{
       id: '00000000-0000-4000-8000-000000000002',

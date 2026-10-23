@@ -127,6 +127,7 @@ create table if not exists public.products (
   packaging jsonb not null default '[]'::jsonb,
   consumo_energia jsonb not null default '[]'::jsonb,
   consumo_gas jsonb not null default '[]'::jsonb,
+  impresion jsonb,
   
   -- Mano de obra
   tiempo_produccion_horas numeric not null default 0 check (tiempo_produccion_horas >= 0),
@@ -145,7 +146,8 @@ create table if not exists public.products (
 
 alter table public.products
   add column if not exists costos_fijos_unitarios numeric not null default 0 check (costos_fijos_unitarios >= 0),
-  add column if not exists impuestos_comisiones_porcentaje numeric not null default 0 check (impuestos_comisiones_porcentaje >= 0 and impuestos_comisiones_porcentaje < 100);
+  add column if not exists impuestos_comisiones_porcentaje numeric not null default 0 check (impuestos_comisiones_porcentaje >= 0 and impuestos_comisiones_porcentaje < 100),
+  add column if not exists impresion jsonb;
 
 -- RLS: products
 alter table public.products enable row level security;

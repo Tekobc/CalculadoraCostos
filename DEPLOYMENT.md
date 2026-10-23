@@ -6,6 +6,7 @@ Esta guía configura una instancia para probar el flujo completo con un emprendi
 
 1. En el proyecto de Supabase, abrí **SQL Editor**.
 2. Pegá y ejecutá el contenido de [`src/lib/supabase/schema.sql`](./src/lib/supabase/schema.sql). Crea las tablas, activa RLS, aplica las políticas y los permisos, y solicita recargar el esquema de la Data API.
+   Si actualizás una instalación existente para agregar costos de impresión, volvé a ejecutar el mismo script: agrega de forma idempotente la columna opcional de impresión a los productos.
 3. Confirmá en **Table Editor** que existan `business_profiles` y `products`.
 4. En **Authentication → URL Configuration**, configurá:
    - **Site URL** con el dominio de producción de Vercel.

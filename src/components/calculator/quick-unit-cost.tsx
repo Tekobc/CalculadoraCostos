@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrencyARS } from '@/lib/formatters/currency';
 import { calculateSupplyItemCost } from '@/domain/calculator/supplies';
+import { calculatePrintingCost } from '@/domain/calculator/printing';
 import { SupplyItem } from '@/domain/schemas/costs.schema';
 import { Product } from '@/domain/schemas/product.schema';
 import { BusinessProfile } from '@/domain/schemas/profile.schema';
@@ -82,10 +83,14 @@ export function QuickUnitCostCalculator({
   const isServiceBusiness = profile?.tipo === 'servicio';
   const isMixedBusiness = profile?.tipo === 'mixto';
   const itemLabel = isServiceBusiness ? 'servicio' : isMixedBusiness ? 'producto o servicio' : 'producto';
+  const usePrinting = activeModules?.includes('impresion') ?? false;
   const [nombreProducto, setNombreProducto] = useState('');
   const [unidadesLote, setUnidadesLote] = useState<string>(isDemo ? '12' : '1');
   const [manoDeObraHoras, setManoDeObraHoras] = useState<string>(isDemo ? '2' : '0');
   const [costoHoraMo, setCostoHoraMo] = useState<string>(isDemo ? '3000' : '0');
+  const [nombreHoja, setNombreHoja] = useState('Hoja impresa');
+  const [costoHoja, setCostoHoja] = useState('0');
+  const [piezasPorHoja, setPiezasPorHoja] = useState('1');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -227,8 +232,16 @@ export function QuickUnitCostCalculator({
   const horasMo = parseFloat(manoDeObraHoras) || 0;
   const tarifaMo = parseFloat(costoHoraMo) || 0;
   const totalMo = useLabor ? new Decimal(horasMo).times(tarifaMo) : new Decimal(0);
+  const printing = usePrinting
+    ? {
+        nombre_hoja: nombreHoja.trim() || 'Hoja impresa',
+        costo_por_hoja: Math.max(0, parseFloat(costoHoja) || 0),
+        unidades_por_hoja: Math.max(1, Math.round(parseFloat(piezasPorHoja) || 1)),
+      }
+    : null;
+  const totalPrinting = calculatePrintingCost(printing, unidades);
 
-  const costoTotalLote = totalInsumos.plus(totalMo);
+  const costoTotalLote = totalInsumos.plus(totalMo).plus(totalPrinting);
   const costoUnitario = costoTotalLote.dividedBy(unidades);
 
   return (
@@ -416,6 +429,31 @@ export function QuickUnitCostCalculator({
           </div>
         </div>}
 
+        {usePrinting && (
+          <section className="space-y-3 rounded-xl border border-ink/10 bg-white/80 p-4">
+            <div>
+              <h4 className="text-sm font-semibold text-ink">Impresión por hoja</h4>
+              <p className="mt-1 max-w-prose text-xs text-ink/65">
+                Incluí material, tinta, energía y uso de máquina en el costo total por hoja para evitar contarlos dos veces.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <Label htmlFor="quick-print-sheet">Hoja o material</Label>
+                <Input id="quick-print-sheet" value={nombreHoja} onChange={(event) => setNombreHoja(event.target.value)} placeholder="A4 autoadhesiva" />
+              </div>
+              <div>
+                <Label htmlFor="quick-print-cost">Costo total por hoja ($)</Label>
+                <Input id="quick-print-cost" type="number" min="0" step="0.01" value={costoHoja} onChange={(event) => setCostoHoja(event.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="quick-print-yield">Piezas vendibles por hoja</Label>
+                <Input id="quick-print-yield" type="number" min="1" step="1" value={piezasPorHoja} onChange={(event) => setPiezasPorHoja(event.target.value)} />
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Resumen Final */}
         <div className="bg-canvas rounded-2xl p-5 border border-ink/10 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="space-y-1 text-center sm:text-left">
@@ -423,6 +461,8 @@ export function QuickUnitCostCalculator({
               {useSupplies && <>Insumos: <strong className="tabular-nums">{formatCurrencyARS(totalInsumos.toNumber())}</strong></>}
               {useSupplies && useLabor && ' · '}
               {useLabor && <>{isServiceBusiness ? 'Tiempo de servicio' : 'Mano de obra'}: <strong className="tabular-nums">{formatCurrencyARS(totalMo.toNumber())}</strong></>}
+              {(useSupplies || useLabor) && usePrinting && ' · '}
+              {usePrinting && <>Impresión: <strong className="tabular-nums">{formatCurrencyARS(totalPrinting.toNumber())}</strong></>}
             </p>
             <p className="text-xs text-ink/60">
               Total {isServiceBusiness ? 'servicios' : 'tanda'} ({unidades} {isServiceBusiness ? 'servicios' : 'unidades'}): <span className="tabular-nums font-semibold">{formatCurrencyARS(costoTotalLote.toNumber())}</span>
@@ -463,6 +503,7 @@ export function QuickUnitCostCalculator({
                     packaging: [],
                     consumo_energia: [],
                     consumo_gas: [],
+                    impresion: printing,
                     tiempo_produccion_horas: horasMo,
                     costo_hora_mano_obra: tarifaMo,
                     costos_fijos_unitarios: 0,
