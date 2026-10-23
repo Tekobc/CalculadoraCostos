@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Decimal from 'decimal.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,45 @@ interface QuickSupply {
   status: 'confirmado' | 'estimado';
 }
 
+type OCRResponse = {
+  supplies: {
+    nombre: string;
+    precioCompra: number;
+    cantidadCompra: number;
+    unidadCompra: string;
+    cantidadUsada: number;
+    unidadUso: string;
+    factorConversion?: number;
+    merma?: number;
+  }[];
+};
+
+function isOCRResponse(value: unknown): value is OCRResponse {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'supplies' in value &&
+    Array.isArray(value.supplies) &&
+    value.supplies.every(
+      (supply) =>
+        typeof supply === 'object' &&
+        supply !== null &&
+        'nombre' in supply &&
+        typeof supply.nombre === 'string' &&
+        'precioCompra' in supply &&
+        typeof supply.precioCompra === 'number' &&
+        'cantidadCompra' in supply &&
+        typeof supply.cantidadCompra === 'number' &&
+        'unidadCompra' in supply &&
+        typeof supply.unidadCompra === 'string' &&
+        'cantidadUsada' in supply &&
+        typeof supply.cantidadUsada === 'number' &&
+        'unidadUso' in supply &&
+        typeof supply.unidadUso === 'string'
+    )
+  );
+}
+
 interface QuickUnitCostCalculatorProps {
   onSaveAsProduct?: (newProduct: Product) => void;
   profile?: BusinessProfile | null;
@@ -44,6 +83,9 @@ export function QuickUnitCostCalculator({
   const [unidadesLote, setUnidadesLote] = useState<string>(isDemo ? '12' : '1');
   const [manoDeObraHoras, setManoDeObraHoras] = useState<string>(isDemo ? '2' : '0');
   const [costoHoraMo, setCostoHoraMo] = useState<string>(isDemo ? '3000' : '0');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [supplies, setSupplies] = useState<QuickSupply[]>(isDemo && useSupplies ? [
     {
@@ -88,6 +130,58 @@ export function QuickUnitCostCalculator({
         status: 'confirmado',
       },
     ]);
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setImportError(null);
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const response = await fetch('/api/recipes/ocr-parse', {
+        method: 'POST',
+        body: formData,
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof result === 'object' &&
+          result !== null &&
+          'error' in result &&
+          typeof result.error === 'string'
+            ? result.error
+            : 'No se pudo procesar la imagen.';
+        throw new Error(message);
+      }
+      if (!isOCRResponse(result)) {
+        throw new Error('La respuesta de importación no tiene un formato válido.');
+      }
+      if (result.supplies.length === 0) {
+        throw new Error('No se encontraron insumos en la imagen.');
+      }
+
+      const importedSupplies = result.supplies.map((supply) => ({
+        id: crypto.randomUUID(),
+        nombre: supply.nombre,
+        precioCompra: String(supply.precioCompra),
+        cantidadCompra: String(supply.cantidadCompra),
+        unidadCompra: supply.unidadCompra,
+        cantidadUsada: String(supply.cantidadUsada),
+        unidadUso: supply.unidadUso,
+        factorConversion: String(supply.factorConversion ?? 1),
+        merma: String(supply.merma ?? 0),
+        status: 'estimado' as const,
+      }));
+      setSupplies((current) => [...current, ...importedSupplies]);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'No se pudo procesar la imagen.');
+    } finally {
+      setImporting(false);
+    }
   };
 
   const removeSupply = (id: string) => {
@@ -209,10 +303,26 @@ export function QuickUnitCostCalculator({
         {useSupplies && <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="font-semibold text-ink text-sm sm:text-base">Insumos y Materias Primas</h4>
-            <Button size="sm" variant="outline" onClick={addSupply}>
-              + Agregar insumo
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={addSupply} disabled={importing}>
+                + Agregar insumo
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+                {importing ? 'Procesando imagen...' : '📷 Importar por Foto/Imagen'}
+              </Button>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileChange}
+                disabled={importing}
+                aria-label="Seleccionar imagen de insumos"
+              />
+            </div>
           </div>
+          {importError && <p role="alert" className="text-xs text-danger">{importError}</p>}
 
           <div className="space-y-2">
             {itemsCalculated.map((item) => (
