@@ -12,6 +12,7 @@ import {
   ProductionEntry,
   ProductionEntrySchema,
 } from '@/domain/schemas/operations.schema';
+import { BusinessProfile } from '@/domain/schemas/profile.schema';
 import {
   estimateProduct,
   getOperationShortages,
@@ -27,6 +28,8 @@ interface OperationsManagerProps {
   products: Product[];
   userId: string | null;
   accountReady: boolean;
+  businessType?: BusinessProfile['tipo'];
+  tracksInventory?: boolean;
   view: OperationsView;
 }
 
@@ -79,6 +82,8 @@ export function OperationsManager({
   products,
   userId,
   accountReady,
+  businessType,
+  tracksInventory = true,
   view,
 }: OperationsManagerProps) {
   const [workspace, setWorkspace] = useState<OperationsWorkspace>(EMPTY_OPERATIONS_WORKSPACE);
@@ -313,7 +318,11 @@ export function OperationsManager({
     setEntryQuantity('1');
     setEntryCustomer('');
     setEntryNotes('');
-    setMessage(entryType === 'order' ? 'Pedido agregado y stock reservado.' : 'Producción agregada y stock reservado.');
+    setMessage(entryType === 'order'
+      ? businessType === 'servicio'
+        ? 'Trabajo agregado a la agenda.'
+        : tracksInventory ? 'Pedido agregado y stock reservado.' : 'Pedido agregado.'
+      : tracksInventory ? 'Producción agregada y stock reservado.' : 'Producción agregada.');
     setMessageIsError(false);
   };
 
@@ -324,7 +333,7 @@ export function OperationsManager({
       return;
     }
 
-    const requirements = getSupplyRequirements(product, entry.cantidad);
+    const requirements = tracksInventory ? getSupplyRequirements(product, entry.cantidad) : [];
     const insufficient = requirements.find((requirement) => {
       const available = workspace.inventario
         .filter((item) => keyFor(item.nombre, item.unidad) === keyFor(requirement.nombre, requirement.unidad))
@@ -355,7 +364,9 @@ export function OperationsManager({
         item.id === entry.id ? { ...item, estado: 'completed' } : item
       ),
     });
-    setMessage(`${entry.tipo === 'order' ? 'Pedido' : 'Producción'} marcado como realizado; stock actualizado.`);
+    setMessage(tracksInventory
+      ? `${entry.tipo === 'order' ? 'Pedido' : 'Producción'} marcado como realizado; stock actualizado.`
+      : `${businessType === 'servicio' ? 'Trabajo' : entry.tipo === 'order' ? 'Pedido' : 'Producción'} marcado como realizado.`);
     setMessageIsError(false);
   };
 
@@ -371,12 +382,21 @@ export function OperationsManager({
     return <p role="status" className="rounded-xl bg-white/70 px-4 py-5 text-sm text-ink/70">Cargando stock y operaciones…</p>;
   }
 
-  const title = view === 'inventory' ? 'Stock de insumos' : view === 'production' ? 'Producción' : 'Pedidos';
+  const isServiceBusiness = businessType === 'servicio';
+  const title = view === 'inventory'
+    ? 'Stock de insumos'
+    : view === 'production'
+      ? 'Producción'
+      : isServiceBusiness ? 'Trabajos y turnos' : 'Pedidos';
   const description = view === 'inventory'
     ? 'Un stock compartido para tus recetas, tandas y pedidos.'
     : view === 'production'
       ? 'Planificá lo que vas a producir por día o por semana.'
-      : 'Anotá pedidos de clientes y revisá si tenés lo necesario para cumplirlos.';
+      : isServiceBusiness
+        ? 'Organizá los trabajos o turnos, las fechas y los datos de cada cliente.'
+        : tracksInventory
+          ? 'Anotá pedidos de clientes y revisá si tenés lo necesario para cumplirlos.'
+          : 'Registrá los pedidos de tus clientes y organizá las fechas de entrega.';
   const visibleEntries = workspace.operaciones
     .filter((entry) => entry.tipo === (view === 'orders' ? 'order' : 'production'))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -386,7 +406,7 @@ export function OperationsManager({
       <header className="flex flex-col gap-3 border-b border-ink/10 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-primary">
-            {view === 'inventory' ? 'Insumos' : view === 'production' ? 'Planificación' : 'Clientes'}
+            {view === 'inventory' ? 'Insumos' : view === 'production' ? 'Planificación' : isServiceBusiness ? 'Agenda' : 'Clientes'}
           </p>
           <h2 className="font-heading text-2xl font-bold text-ink">{title}</h2>
           <p className="mt-1 max-w-prose text-sm text-ink/70">{description}</p>
@@ -414,7 +434,7 @@ export function OperationsManager({
         </p>
       )}
 
-      {view !== 'inventory' && shortages.length > 0 && (
+      {view !== 'inventory' && tracksInventory && shortages.length > 0 && (
         <section className="rounded-2xl border border-danger/20 bg-danger/5 p-4 sm:p-5" aria-label="Insumos faltantes">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 text-lg text-danger" aria-hidden="true">!</span>
@@ -491,22 +511,34 @@ export function OperationsManager({
         <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_1.1fr]">
           <form onSubmit={createEntry} className="h-fit space-y-4 rounded-2xl bg-white/80 p-5 shadow-sm">
             <div>
-              <h3 className="font-heading text-lg font-bold text-ink">{view === 'orders' ? 'Cargar pedido' : 'Planificar producción'}</h3>
-              <p className="mt-1 text-sm text-ink/65">Los insumos quedan reservados al planificar y se descuentan al marcarlo realizado.</p>
+              <h3 className="font-heading text-lg font-bold text-ink">
+                {view === 'orders'
+                  ? isServiceBusiness ? 'Agendar trabajo o turno' : 'Cargar pedido'
+                  : 'Planificar producción'}
+              </h3>
+              <p className="mt-1 text-sm text-ink/65">
+                {tracksInventory
+                  ? 'Los insumos quedan reservados al planificar y se descuentan al marcarlo realizado.'
+                  : 'Registrá fechas y detalles para organizar el trabajo.'}
+              </p>
             </div>
             {products.length === 0 ? (
-              <p className="rounded-xl bg-accent/10 px-3 py-3 text-sm text-ink">Primero agregá un producto o receta en “Mis Productos y Recetas”.</p>
+              <p className="rounded-xl bg-accent/10 px-3 py-3 text-sm text-ink">
+                {isServiceBusiness
+                  ? 'Primero agregá un servicio en el catálogo.'
+                  : 'Primero agregá un producto o receta en el catálogo.'}
+              </p>
             ) : (
               <>
                 <label className="block space-y-1.5 text-sm font-medium text-ink">
-                  <span>Producto o receta</span>
+                  <span>{isServiceBusiness ? 'Servicio' : 'Producto o receta'}</span>
                   <select value={entryProductId} onChange={(event) => setEntryProductId(event.target.value)} required className="min-h-11 w-full rounded-xl border border-ink/15 bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15">
                     {products.map((product) => <option key={product.id} value={product.id}>{product.nombre}</option>)}
                   </select>
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  <InputField label="Unidades" type="number" min="0.001" step="any" value={entryQuantity} onChange={(event) => setEntryQuantity(event.target.value)} required />
-                  <InputField label={view === 'orders' ? 'Fecha de entrega' : 'Fecha de producción'} type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} required />
+                  <InputField label={isServiceBusiness ? 'Horas o unidades' : 'Unidades'} type="number" min="0.001" step="any" value={entryQuantity} onChange={(event) => setEntryQuantity(event.target.value)} required />
+                  <InputField label={view === 'orders' ? isServiceBusiness ? 'Fecha del trabajo' : 'Fecha de entrega' : 'Fecha de producción'} type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} required />
                 </div>
                 {view === 'orders' && <InputField label="Cliente (opcional)" value={entryCustomer} onChange={(event) => setEntryCustomer(event.target.value)} placeholder="Nombre del cliente" />}
                 <label className="block space-y-1.5 text-sm font-medium text-ink">
@@ -514,7 +546,9 @@ export function OperationsManager({
                   <textarea value={entryNotes} onChange={(event) => setEntryNotes(event.target.value)} rows={2} className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" placeholder="Detalles para tener en cuenta" />
                 </label>
                 <button type="submit" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-                  <span aria-hidden="true">+</span> {view === 'orders' ? 'Agregar pedido' : 'Agregar producción'}
+                  <span aria-hidden="true">+</span> {view === 'orders'
+                    ? isServiceBusiness ? 'Agendar trabajo' : 'Agregar pedido'
+                    : 'Agregar producción'}
                 </button>
               </>
             )}
@@ -548,12 +582,16 @@ export function OperationsManager({
 
             <section className="space-y-3">
               <h3 className="font-heading text-lg font-bold text-ink">
-                {view === 'orders' ? 'Pedidos cargados' : 'Producción planificada'}
+                {view === 'orders'
+                  ? isServiceBusiness ? 'Trabajos agendados' : 'Pedidos cargados'
+                  : 'Producción planificada'}
                 <span className="font-body text-sm font-normal text-ink/50"> ({visibleEntries.length})</span>
               </h3>
               {visibleEntries.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-ink/20 bg-white/50 p-6 text-sm text-ink/65">
-                  {view === 'orders' ? 'Todavía no cargaste pedidos.' : 'Todavía no planificaste producción.'}
+                  {view === 'orders'
+                    ? isServiceBusiness ? 'Todavía no agendaste trabajos.' : 'Todavía no cargaste pedidos.'
+                    : 'Todavía no planificaste producción.'}
                 </div>
               ) : (
                 <ul className="space-y-3">
@@ -561,20 +599,22 @@ export function OperationsManager({
                     const product = products.find((item) => item.id === entry.product_id);
                     const estimate = product ? estimateProduct(product, entry.cantidad, workspace.inventario) : null;
                     const entryShortages = entry.estado === 'planned' && product
-                      ? getOperationShortages(workspace.inventario, [], products, entry)
+                      ? tracksInventory
+                        ? getOperationShortages(workspace.inventario, [], products, entry)
+                        : []
                       : [];
                     return (
                       <li key={entry.id} className="rounded-2xl bg-white/80 p-4 shadow-sm sm:p-5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <h4 className="font-semibold text-ink">{product?.nombre ?? 'Producto eliminado'}</h4>
+                              <h4 className="font-semibold text-ink">{product?.nombre ?? (isServiceBusiness ? 'Servicio eliminado' : 'Producto eliminado')}</h4>
                               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${entry.estado === 'completed' ? 'bg-primary/10 text-primary' : 'bg-accent/15 text-ink'}`}>
                                 {entry.estado === 'completed' ? 'Realizado' : 'Planificado'}
                               </span>
                             </div>
                             <p className="mt-1 text-sm text-ink/65">
-                              {formatAmount(entry.cantidad)} unidades · {shortDate(entry.fecha)}
+                              {formatAmount(entry.cantidad)} {isServiceBusiness ? 'horas o unidades' : 'unidades'} · {shortDate(entry.fecha)}
                               {entry.cliente ? ` · ${entry.cliente}` : ''}
                             </p>
                             {entry.notas && <p className="mt-2 text-sm text-ink/65">{entry.notas}</p>}

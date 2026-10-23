@@ -34,10 +34,16 @@ export function ProductCatalogManager({
   const [selectedProductId, setSelectedProductId] = useState<string>(products[0]?.id || '1');
   const [newProductName, setNewProductName] = useState('');
   const [productNameError, setProductNameError] = useState<string | null>(null);
+  const [newItemType, setNewItemType] = useState<Product['tipo']>(
+    profile?.tipo === 'servicio' ? 'servicio' : 'producto'
+  );
 
   const activeProduct = products.find((p) => p.id === selectedProductId) || products[0];
   const activeModules: ModuleType[] = profile?.modulos_activos ?? ['insumos', 'mano_de_obra'];
   const moduleEnabled = (module: ModuleType) => activeModules.includes(module);
+  const isMixedBusiness = profile?.tipo === 'mixto';
+  const isServiceCatalog = profile?.tipo === 'servicio';
+  const newItemLabel = newItemType === 'servicio' ? 'servicio' : 'producto';
 
   const updateSupply = (supplyId: string, patch: Partial<SupplyItem>) => {
     if (!activeProduct) return;
@@ -79,7 +85,7 @@ export function ProductCatalogManager({
     event.preventDefault();
     const nombre = newProductName.trim();
     if (!nombre) {
-      setProductNameError('Escribí el nombre del producto para agregarlo.');
+      setProductNameError(`Escribí el nombre del ${isServiceCatalog ? 'servicio' : 'producto'} para agregarlo.`);
       return;
     }
 
@@ -87,7 +93,7 @@ export function ProductCatalogManager({
     const newProduct: Product = {
       id: newId,
       nombre,
-      tipo: profile?.tipo === 'servicio' ? 'servicio' : 'producto',
+      tipo: isMixedBusiness ? newItemType : isServiceCatalog ? 'servicio' : 'producto',
       unidades_lote_base: 1,
       insumos: [],
       packaging: [],
@@ -103,7 +109,7 @@ export function ProductCatalogManager({
       fecha_actualizacion: new Date().toISOString(),
     };
 
-    onProductsChange([...products, newProduct]);
+      onProductsChange([...products, newProduct]);
     setSelectedProductId(newId);
     setNewProductName('');
     setProductNameError(null);
@@ -247,7 +253,7 @@ export function ProductCatalogManager({
         >
           <div>
             <Label htmlFor="new-product-name" required>
-              Nombre del producto
+              Nombre del {isServiceCatalog ? 'servicio' : 'producto o servicio'}
             </Label>
             <Input
               id="new-product-name"
@@ -256,7 +262,7 @@ export function ProductCatalogManager({
                 setNewProductName(event.target.value);
                 if (event.target.value.trim()) setProductNameError(null);
               }}
-              placeholder="Ej.: Torta de chocolate 20 cm"
+              placeholder={isServiceCatalog ? 'Ej.: Asesoría inicial' : 'Ej.: Torta de chocolate 20 cm'}
               aria-describedby={productNameError ? 'new-product-error' : 'new-product-hint'}
               error={Boolean(productNameError)}
             />
@@ -266,13 +272,28 @@ export function ProductCatalogManager({
               </p>
             ) : (
               <p id="new-product-hint" className="mt-1 text-xs text-ink/60">
-                Agregalo y completá su receta, rendimiento y costos.
+                Agregalo y completá sus costos.
               </p>
             )}
           </div>
-          <Button type="submit" variant="primary">
-            + Agregar producto
-          </Button>
+          <div className="flex flex-wrap items-end gap-2">
+            {isMixedBusiness && (
+              <label className="space-y-1.5 text-sm font-medium text-ink">
+                <span>Tipo</span>
+                <select
+                  value={newItemType}
+                  onChange={(event) => setNewItemType(event.target.value as Product['tipo'])}
+                  className="min-h-11 rounded-xl border border-ink/15 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <option value="producto">Producto</option>
+                  <option value="servicio">Servicio</option>
+                </select>
+              </label>
+            )}
+            <Button type="submit" variant="primary">
+              + Agregar {isServiceCatalog ? 'servicio' : isMixedBusiness ? newItemLabel : 'producto'}
+            </Button>
+          </div>
         </form>
       </div>
 
@@ -292,8 +313,8 @@ export function ProductCatalogManager({
                   className="mb-1 border-transparent px-0 text-lg font-bold shadow-none focus-visible:border-ink/20"
                 />
                 <Input
-                  aria-label="Presentación o tamaño del producto"
-                  placeholder="Presentación: por ejemplo, torta de 20 cm"
+                  aria-label={activeProduct.tipo === 'servicio' ? 'Descripción del servicio' : 'Presentación o tamaño del producto'}
+                  placeholder={activeProduct.tipo === 'servicio' ? 'Descripción del servicio' : 'Presentación: por ejemplo, torta de 20 cm'}
                   defaultValue={activeProduct.descripcion ?? ''}
                   onBlur={(event) => {
                     const descripcion = event.currentTarget.value.trim();
@@ -304,7 +325,7 @@ export function ProductCatalogManager({
                   className="mb-2 max-w-md text-xs"
                 />
                 <CardDescription>
-                  Rendimiento actual: {activeProduct.unidades_lote_base} unidad(es) por tanda
+                  {activeProduct.tipo === 'servicio' ? 'Base de cálculo' : 'Rendimiento actual'}: {activeProduct.unidades_lote_base} {activeProduct.tipo === 'servicio' ? 'unidad(es) de servicio' : 'unidad(es) por tanda'}
                   {moduleEnabled('mano_de_obra') || moduleEnabled('servicios')
                     ? ` · Mano de obra: ${activeProduct.tiempo_produccion_horas}h a ${formatCurrencyARS(activeProduct.costo_hora_mano_obra)}/h`
                     : ''}

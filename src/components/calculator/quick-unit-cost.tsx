@@ -79,6 +79,9 @@ export function QuickUnitCostCalculator({
   const activeModules = profile?.modulos_activos;
   const useSupplies = !activeModules || activeModules.includes('insumos');
   const useLabor = !activeModules || activeModules.includes('mano_de_obra') || activeModules.includes('servicios');
+  const isServiceBusiness = profile?.tipo === 'servicio';
+  const isMixedBusiness = profile?.tipo === 'mixto';
+  const itemLabel = isServiceBusiness ? 'servicio' : isMixedBusiness ? 'producto o servicio' : 'producto';
   const [nombreProducto, setNombreProducto] = useState('');
   const [unidadesLote, setUnidadesLote] = useState<string>(isDemo ? '12' : '1');
   const [manoDeObraHoras, setManoDeObraHoras] = useState<string>(isDemo ? '2' : '0');
@@ -233,28 +236,32 @@ export function QuickUnitCostCalculator({
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <CardTitle>Calculadora de Insumos y Costo Unitario</CardTitle>
+            <CardTitle>{isServiceBusiness ? 'Calculadora de costo de servicio' : 'Calculadora de costo rápido'}</CardTitle>
             <CardDescription>
-              Cargá tus ingredientes o materias primas y calculá con precisión el costo por unidad de tu receta o lote.
+              {isServiceBusiness
+                ? 'Cargá el tiempo y los costos asociados para saber cuánto te cuesta brindar cada servicio.'
+                : 'Sumá tus materias primas y el tiempo de trabajo para estimar el costo de cada unidad o tanda.'}
             </CardDescription>
           </div>
-          <Badge variant="support">Lote de {unidades} u.</Badge>
+          <Badge variant="support">
+            {isServiceBusiness ? `Servicios: ${unidades}` : `Lote de ${unidades} u.`}
+          </Badge>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-6">
         {onSaveAsProduct && (
           <div className="max-w-xl">
-            <Label htmlFor="quick-product-name" required>Nombre de la receta</Label>
+            <Label htmlFor="quick-product-name" required>Nombre del {itemLabel}</Label>
             <Input
               id="quick-product-name"
               value={nombreProducto}
               onChange={(event) => setNombreProducto(event.target.value)}
-              placeholder="Ej.: Alfajores de maicena"
+              placeholder={isServiceBusiness ? 'Ej.: Asesoría inicial' : 'Ej.: Alfajores de maicena'}
               aria-describedby="quick-product-name-hint"
             />
             <p id="quick-product-name-hint" className="mt-1 text-xs text-ink/60">
-              Este nombre se usará al guardarla en tu catálogo de productos.
+              Se agregará a tu catálogo para que puedas completar o ajustar sus costos.
             </p>
           </div>
         )}
@@ -262,7 +269,7 @@ export function QuickUnitCostCalculator({
         {/* Parámetros de lote */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-canvas/60 p-4 rounded-xl border border-ink/5">
           <div>
-            <Label htmlFor="unidades-lote">Unidades por tanda / lote</Label>
+            <Label htmlFor="unidades-lote">{isServiceBusiness ? 'Cantidad de servicios' : 'Unidades por tanda / lote'}</Label>
             <Input
               id="unidades-lote"
               type="number"
@@ -413,10 +420,12 @@ export function QuickUnitCostCalculator({
         <div className="bg-canvas rounded-2xl p-5 border border-ink/10 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="space-y-1 text-center sm:text-left">
             <p className="text-xs text-ink/70">
-              Insumos: <strong className="tabular-nums">{formatCurrencyARS(totalInsumos.toNumber())}</strong> + Mano de obra: <strong className="tabular-nums">{formatCurrencyARS(totalMo.toNumber())}</strong>
+              {useSupplies && <>Insumos: <strong className="tabular-nums">{formatCurrencyARS(totalInsumos.toNumber())}</strong></>}
+              {useSupplies && useLabor && ' · '}
+              {useLabor && <>{isServiceBusiness ? 'Tiempo de servicio' : 'Mano de obra'}: <strong className="tabular-nums">{formatCurrencyARS(totalMo.toNumber())}</strong></>}
             </p>
             <p className="text-xs text-ink/60">
-              Total tanda ({unidades} unidades): <span className="tabular-nums font-semibold">{formatCurrencyARS(costoTotalLote.toNumber())}</span>
+              Total {isServiceBusiness ? 'servicios' : 'tanda'} ({unidades} {isServiceBusiness ? 'servicios' : 'unidades'}): <span className="tabular-nums font-semibold">{formatCurrencyARS(costoTotalLote.toNumber())}</span>
             </p>
           </div>
 
@@ -467,7 +476,7 @@ export function QuickUnitCostCalculator({
                 }}
                 className="mt-2 text-xs w-full"
               >
-                💾 Guardar en Mis Productos
+                💾 Guardar en {isServiceBusiness ? 'Mis servicios' : 'Mi catálogo'}
               </Button>
             )}
           </div>

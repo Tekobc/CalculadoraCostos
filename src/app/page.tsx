@@ -281,9 +281,32 @@ export default function HomePage() {
   };
 
   const moduleEnabled = (module: ModuleType) => !profile || profile.modulos_activos.includes(module);
+  const isServiceBusiness = profile?.tipo === 'servicio';
+  const isMixedBusiness = profile?.tipo === 'mixto';
+  const catalogLabel = isServiceBusiness
+    ? 'Mis servicios'
+    : isMixedBusiness
+      ? 'Mis productos y servicios'
+      : 'Mis productos y recetas';
+  const quickCalculatorLabel = isServiceBusiness
+    ? 'Calcular costo de servicio'
+    : isMixedBusiness
+      ? 'Cálculo rápido'
+      : 'Calcular costo de producto';
+  const navigationItems = [
+    { id: 'products' as const, label: catalogLabel, icon: isServiceBusiness ? '🧰' : isMixedBusiness ? '🧩' : '🍰', visible: true },
+    { id: 'simulator' as const, label: 'Variación de costos', icon: '⚡', visible: products.length > 0 && (moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios')) },
+    { id: 'pricing' as const, label: 'Simular precios', icon: '📈', visible: moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios') },
+    { id: 'calculator' as const, label: quickCalculatorLabel, icon: '🧮', visible: moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios') },
+    { id: 'inventory' as const, label: 'Stock de insumos', icon: '📦', visible: !profile || moduleEnabled('insumos') },
+    { id: 'production' as const, label: 'Plan de producción', icon: '🏭', visible: !profile || profile.tipo !== 'servicio' },
+    { id: 'orders' as const, label: isServiceBusiness ? 'Trabajos y turnos' : 'Pedidos', icon: '🧾', visible: true },
+    { id: 'onboarding' as const, label: profile ? 'Editar mi perfil' : 'Configurar emprendimiento', icon: '✨', visible: true },
+    { id: 'auth' as const, label: userEmail ? 'Mi cuenta' : 'Guardar en la nube', icon: '☁️', visible: true },
+  ].filter((item) => item.visible);
 
   // Contar insumos con advertencia de inflación en el catálogo
-  const totalInsumosDesactualizados = products.reduce((acc, p) => {
+  const totalInsumosDesactualizados = (moduleEnabled('insumos') ? products : []).reduce((acc, p) => {
     const outdated = p.insumos.filter((i) => {
       if (!i.fecha_actualizacion) return true;
       const days = Math.floor(
@@ -306,7 +329,9 @@ export default function HomePage() {
             </h1>
           </div>
           <p className="text-sm text-ink/75 max-w-prose">
-            Claridad real sobre tus costos y precios. Sin fórmulas confusas ni sorpresas a fin de mes.
+            {profile
+              ? `Un espacio preparado para ${profile.rubro.toLocaleLowerCase('es-AR')}: ordená tus costos y definí precios con claridad.`
+              : 'Claridad real sobre tus costos y precios. Sin fórmulas confusas ni sorpresas a fin de mes.'}
           </p>
         </div>
 
@@ -332,104 +357,21 @@ export default function HomePage() {
 
       {/* Selector de pestañas */}
       <nav className="flex flex-wrap gap-2 border-b border-ink/10 pb-3" aria-label="Navegación principal">
-        <button
-          onClick={() => setActiveTab('products')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'products'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          }`}
-        >
-          {profile?.tipo === 'servicio' ? '🧰 Mis servicios' : '🍰 Mis Productos y Recetas'}
-        </button>
-
-        {products.length > 0 && (moduleEnabled('insumos') || moduleEnabled('mano_de_obra')) && <button
-          onClick={() => setActiveTab('simulator')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'simulator'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          }`}
-        >
-          ⚡ Alertas y Variación de Costos
-        </button>}
-
-        {(moduleEnabled('insumos') || moduleEnabled('servicios')) && <button
-          onClick={() => setActiveTab('pricing')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'pricing'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          }`}
-        >
-          📈 Margen vs Markup
-        </button>}
-
-        {(moduleEnabled('insumos') || moduleEnabled('mano_de_obra') || moduleEnabled('servicios')) && <button
-          onClick={() => setActiveTab('calculator')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'calculator'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          }`}
-        >
-          🥣 Calculadora de Tanda Rápida
-        </button>}
-
-        <button
-          onClick={() => setActiveTab('inventory')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'inventory'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
-        >
-          📦 Stock
-        </button>
-
-        <button
-          onClick={() => setActiveTab('production')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'production'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
-        >
-          🏭 Producción
-        </button>
-
-        <button
-          onClick={() => setActiveTab('orders')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'orders'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
-        >
-          🧾 Pedidos
-        </button>
-
-        <button
-          onClick={() => setActiveTab(userId ? 'onboarding' : 'auth')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'onboarding'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          }`}
-        >
-          ✨ {profile ? 'Editar mi perfil' : 'Configurar emprendimiento'}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('auth')}
-          className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all ${
-            activeTab === 'auth'
-              ? 'bg-primary text-white shadow-sm'
-              : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
-          }`}
-        >
-          ☁️ {userEmail ? 'Mi Cuenta Nube' : 'Guardar en la Nube'}
-        </button>
+        {navigationItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setActiveTab(item.id === 'onboarding' && !userId ? 'auth' : item.id)}
+            aria-current={activeTab === item.id ? 'page' : undefined}
+            className={`min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
+              activeTab === item.id
+                ? 'bg-primary text-white shadow-sm'
+                : 'bg-white/60 text-ink/70 hover:bg-white hover:text-ink border border-ink/10'
+            }`}
+          >
+            <span aria-hidden="true">{item.icon}</span> {item.label}
+          </button>
+        ))}
       </nav>
 
       {/* Contenido dinámico */}
@@ -500,6 +442,8 @@ export default function HomePage() {
             products={products}
             userId={userId}
             accountReady={!authLoading && !accountLoading}
+            businessType={profile?.tipo}
+            tracksInventory={!profile || moduleEnabled('insumos')}
             view={activeTab === 'orders' || activeTab === 'production' ? activeTab : 'inventory'}
           />
         </div>
